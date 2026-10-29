@@ -480,18 +480,45 @@ export function generateThinkPadT14RenderScripts(
 } {
   const grade = COLOR_GRADING_PRESETS.find((g) => g.id === colorGradeId) || COLOR_GRADING_PRESETS[0];
 
+  const manifestEntries = episode.slides
+    .map((s) => {
+      const numPad = String(s.slideNumber).padStart(2, '0');
+      return `echo file 'data/stills/slide_${numPad}.png' >> "%~dp0slides_manifest.txt"
+echo duration ${s.durationSeconds} >> "%~dp0slides_manifest.txt"`;
+    })
+    .join('\n');
+
   const windowsBat = `@echo off
 REM ==============================================================================
 REM TERNFALL STUDIO - KINETIC VIDEO ESSAY RENDER ENGINE (ThinkPad T14 / MX330 NVENC)
 REM Hardware: Intel i7-10510U, 20GB RAM, NVIDIA GeForce MX330 (Pascal NVENC)
 REM Grade Profile: ${grade.name} (${grade.description})
+REM Loudness Spec: YouTube Standard EBU R128 (-14 LUFS, -1.5dB True Peak)
 REM Output: 1080p 25fps Broadcast Cinema Master (Sub-90s Total Render)
 REM Estimated Credit Cost: $0.00 (Zero Credits)
 REM ==============================================================================
 
 echo [Ternfall Studio] Initializing NVENC Video Essay Engine for %~dp0...
 mkdir "%~dp0output" 2>nul
-mkdir "%~dp0temp_stills" 2>nul
+mkdir "%~dp0data\\stills" 2>nul
+mkdir "%~dp0audio" 2>nul
+
+REM Auto-generate slides_manifest.txt if missing
+if not exist "%~dp0slides_manifest.txt" (
+    echo [MANIFEST] Generating slides_manifest.txt for ${episode.totalSlides} slides...
+    del "%~dp0slides_manifest.txt" 2>nul
+${manifestEntries}
+    echo file 'data/stills/slide_${String(episode.totalSlides).padStart(2, '0')}.png' >> "%~dp0slides_manifest.txt"
+)
+
+REM Verify stills exist; if missing, generate temporary 1080p atmospheric frames so render never crashes
+for /L %%i in (1,1,${episode.totalSlides}) do (
+    set "PAD=0%%i"
+    set "NUM=!PAD:~-2!"
+    if not exist "%~dp0data\\stills\\slide_!NUM!.png" (
+        ffmpeg -y -f lavfi -i "color=c=0x0a1d22:s=1920x1080:d=1" -frames:v 1 "%~dp0data\\stills\\slide_!NUM!.png" -loglevel error
+    )
+)
 
 echo [1/4] Checking NVIDIA NVENC Hardware Acceleration...
 ffmpeg -hide_banner -encoders | findstr "h264_nvenc" >nul
@@ -503,7 +530,7 @@ if %ERRORLEVEL% NEQ 0 (
     set VCODEC=h264_nvenc -preset p4 -rc:v vbr -b:v 8M -maxrate 12M -bufsize 16M
 )
 
-echo [2/4] Assembling ${episode.totalSlides} Illustrated Slides with Ken Burns Drift & 35mm Grade...
+echo [2/4] Assembling ${episode.totalSlides} Illustrated Slides with Ken Burns Drift & 35mm ${grade.name}...
 
 ffmpeg -y ^
   -f concat -safe 0 -i "%~dp0slides_manifest.txt" ^
@@ -513,7 +540,7 @@ ffmpeg -y ^
   "[0:v]${grade.ffmpegFilter}[vgraded]; ^
    [1:a]volume=1.0,highpass=f=80[vocal]; ^
    [2:a]volume=0.35,lowpass=f=120[sub]; ^
-   [vocal][sub]amix=inputs=2:duration=first:dropout_transition=2[aout]" ^
+   [vocal][sub]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-14:TP=-1.5:LRA=11[aout]" ^
   -map "[vgraded]" -map "[aout]" ^
   -c:v %VCODEC% ^
   -c:a aac -b:a 192k -ar 48000 ^

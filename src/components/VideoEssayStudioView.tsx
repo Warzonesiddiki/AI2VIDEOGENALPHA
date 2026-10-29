@@ -150,9 +150,11 @@ export const VideoEssayStudioView: React.FC<VideoEssayStudioViewProps> = ({ proj
 
   useEffect(() => {
     if (masterGainRef.current && audioContextRef.current) {
-      masterGainRef.current.gain.setValueAtTime(
-        isMuted ? 0 : volume,
-        audioContextRef.current.currentTime
+      const targetGain = isMuted ? 0 : volume;
+      masterGainRef.current.gain.cancelScheduledValues(audioContextRef.current.currentTime);
+      masterGainRef.current.gain.linearRampToValueAtTime(
+        targetGain,
+        audioContextRef.current.currentTime + 0.05
       );
     }
   }, [volume, isMuted]);
@@ -178,7 +180,7 @@ export const VideoEssayStudioView: React.FC<VideoEssayStudioViewProps> = ({ proj
   const selectedPersona =
     NARRATOR_PERSONAS.find((p) => p.id === selectedPersonaId) || NARRATOR_PERSONAS[0];
 
-  // Upgraded Test Voice handler for immediate preview
+  // Upgraded Test Voice handler for immediate preview with smooth gain ramps
   const handleTestVoice = (customText?: string) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     initAudio();
@@ -187,7 +189,11 @@ export const VideoEssayStudioView: React.FC<VideoEssayStudioViewProps> = ({ proj
       window.speechSynthesis.cancel();
       setIsTestingVoice(false);
       if (pulseGainRef.current && audioContextRef.current) {
-        pulseGainRef.current.gain.setValueAtTime(0.06, audioContextRef.current.currentTime);
+        pulseGainRef.current.gain.cancelScheduledValues(audioContextRef.current.currentTime);
+        pulseGainRef.current.gain.linearRampToValueAtTime(
+          0.06,
+          audioContextRef.current.currentTime + 0.1
+        );
       }
       return;
     }
@@ -211,16 +217,24 @@ export const VideoEssayStudioView: React.FC<VideoEssayStudioViewProps> = ({ proj
 
     if (matchedVoice) utterance.voice = matchedVoice;
 
-    // Sidechain sub-bass ducking
+    // Sidechain sub-bass ducking with smooth ramp
     if (enableSubBassDucking && pulseGainRef.current && audioContextRef.current) {
-      pulseGainRef.current.gain.setValueAtTime(0.015, audioContextRef.current.currentTime);
+      pulseGainRef.current.gain.cancelScheduledValues(audioContextRef.current.currentTime);
+      pulseGainRef.current.gain.linearRampToValueAtTime(
+        0.015,
+        audioContextRef.current.currentTime + 0.08
+      );
     }
 
     utterance.onstart = () => setIsTestingVoice(true);
     utterance.onend = () => {
       setIsTestingVoice(false);
       if (pulseGainRef.current && audioContextRef.current) {
-        pulseGainRef.current.gain.setValueAtTime(0.06, audioContextRef.current.currentTime);
+        pulseGainRef.current.gain.cancelScheduledValues(audioContextRef.current.currentTime);
+        pulseGainRef.current.gain.linearRampToValueAtTime(
+          0.06,
+          audioContextRef.current.currentTime + 0.15
+        );
       }
     };
     utterance.onerror = () => setIsTestingVoice(false);
@@ -253,15 +267,23 @@ export const VideoEssayStudioView: React.FC<VideoEssayStudioViewProps> = ({ proj
 
       if (matchedVoice) utterance.voice = matchedVoice;
 
-      // Sidechain ducking of 55Hz sub-bass when voice begins
+      // Sidechain ducking of 55Hz sub-bass when voice begins with smooth ramp
       if (enableSubBassDucking && pulseGainRef.current && audioContextRef.current) {
-        pulseGainRef.current.gain.setValueAtTime(0.015, audioContextRef.current.currentTime);
+        pulseGainRef.current.gain.cancelScheduledValues(audioContextRef.current.currentTime);
+        pulseGainRef.current.gain.linearRampToValueAtTime(
+          0.015,
+          audioContextRef.current.currentTime + 0.08
+        );
       }
 
       utterance.onend = () => {
-        // Restore sub-bass tension after sentence completes
+        // Restore sub-bass tension after sentence completes with smooth ramp
         if (pulseGainRef.current && audioContextRef.current) {
-          pulseGainRef.current.gain.setValueAtTime(0.06, audioContextRef.current.currentTime);
+          pulseGainRef.current.gain.cancelScheduledValues(audioContextRef.current.currentTime);
+          pulseGainRef.current.gain.linearRampToValueAtTime(
+            0.06,
+            audioContextRef.current.currentTime + 0.15
+          );
         }
       };
 
@@ -335,19 +357,26 @@ export const VideoEssayStudioView: React.FC<VideoEssayStudioViewProps> = ({ proj
       const width = canvas.width;
       const height = canvas.height;
 
+      // Enable subpixel image smoothing
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
       // 1. Clear background
       ctx.fillStyle = activeSlide.visualTheme.primaryColor || '#0a1619';
       ctx.fillRect(0, 0, width, height);
 
-      // 2. Compute Ken Burns camera zoom & pan factor
+      // 2. Compute Ken Burns camera zoom & pan factor with cinematic easeInOutQuad curve
       let slideStartTime = 0;
       for (let i = 0; i < selectedSlideIndex; i++) {
         slideStartTime += episode.slides[i].durationSeconds;
       }
-      const slideProgress = Math.min(
+      const rawProgress = Math.min(
         1,
         Math.max(0, (localTime - slideStartTime) / activeSlide.durationSeconds)
       );
+      // Cinematic EaseInOutQuad (subtle acceleration & deceleration like documentary track dolly)
+      const slideProgress =
+        rawProgress < 0.5 ? 2 * rawProgress * rawProgress : 1 - Math.pow(-2 * rawProgress + 2, 2) / 2;
 
       ctx.save();
 
