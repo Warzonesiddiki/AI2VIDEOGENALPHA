@@ -68,6 +68,14 @@ export const TopBar: React.FC<TopBarProps> = ({
           Autoproducer
         </button>
         <button
+          onClick={() => onSelectTab('video_essay')}
+          className={`hover:text-slate-100 transition-colors whitespace-nowrap ${
+            activeTab === 'video_essay' ? 'text-teal-400 font-semibold' : ''
+          }`}
+        >
+          Video Essay (0-Credit)
+        </button>
+        <button
           onClick={() => onSelectTab('youtube')}
           className={`hover:text-slate-100 transition-colors whitespace-nowrap ${
             activeTab === 'youtube' ? 'text-teal-400 font-semibold' : ''

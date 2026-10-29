@@ -25,6 +25,8 @@ import {
   createGoogleFlowPlan,
   validateBatchIngestion,
   generateFfmpeg24fpsStitchScript,
+  computeFlowCheckpoint,
+  createFlowAutoproduceOrchestrator,
 } from '../src/core/flow.ts';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -764,8 +766,28 @@ ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_na
           } else {
             printResult({ episodeId: epId, script: scriptBash }, cli.isJson);
           }
+        } else if (cli.subcommand === 'checkpoint') {
+          let plan = await storage.getGoogleFlowPlan(defaultProjectId, epId);
+          if (!plan) {
+            const episode = await storage.getEpisode(defaultProjectId, epId);
+            plan = createGoogleFlowPlan(epId, episode ? episode.workingTitle : 'Episode', 600, 24, 'dense_24fps');
+          }
+          const checkpoint = computeFlowCheckpoint(plan);
+          printResult(checkpoint, cli.isJson);
+        } else if (cli.subcommand === 'autoproduce' || cli.subcommand === 'produce') {
+          const episode = await storage.getEpisode(defaultProjectId, epId);
+          const title = episode ? episode.workingTitle : 'The Eight-Beat Failure';
+          const logline = episode ? episode.logline : 'When the emergency alarm falls silent...';
+          const fps = parseInt((cli.flags.fps as string) || '24', 10);
+          const duration = parseInt((cli.flags.duration as string) || '600', 10);
+
+          const result = createFlowAutoproduceOrchestrator(defaultProjectId, epId, title, logline, {
+            fps,
+            durationSeconds: duration,
+          });
+          printResult(result, cli.isJson);
         } else {
-          printError(`Unknown flow subcommand: ${cli.subcommand}. Use: plan, export, ingest, status, stitch`, cli.isJson);
+          printError(`Unknown flow subcommand: ${cli.subcommand}. Use: plan, export, ingest, status, stitch, checkpoint, autoproduce`, cli.isJson);
         }
         break;
       }

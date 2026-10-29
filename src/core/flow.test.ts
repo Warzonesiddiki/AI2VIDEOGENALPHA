@@ -13,6 +13,13 @@ import {
   createGoogleFlowPlan,
   validateBatchIngestion,
   generateFfmpeg24fpsStitchScript,
+  generateFlowAutoWorkerScript,
+  generateLocalAudioMixScript,
+  generateCompleteYouTubeRenderScript,
+  generateYouTubeMetadataPackage,
+  computeFlowCheckpoint,
+  computeFlowResumePoint,
+  createFlowAutoproduceOrchestrator,
   TERNFALL_CHARACTER_INGREDIENT,
   TERNFALL_NEGATIVE_PROMPT,
 } from './flow.ts';
@@ -139,3 +146,83 @@ test('generateFfmpeg24fpsStitchScript: builds a valid 24fps 1080p FFmpeg command
   assert.ok(script.includes('yuv420p'));
   assert.ok(script.includes('flow_master_1080p_24fps.mp4'));
 });
+
+test('generateFlowAutoWorkerScript: produces runnable 3-account automated worker script', () => {
+  const worker = generateFlowAutoWorkerScript('proj_ternfall_01', 'S01E001', 600);
+
+  assert.ok(worker.includes('flow.google.com'));
+  assert.ok(worker.includes('account_1'));
+  assert.ok(worker.includes('account_2'));
+  assert.ok(worker.includes('frame_'));
+  assert.ok(worker.includes('padStart(5'));
+  assert.ok(worker.includes('14,400 frames'));
+});
+
+test('generateLocalAudioMixScript: produces EBU R128 (-14.0 LUFS) audio synthesis script', () => {
+  const audioScript = generateLocalAudioMixScript('proj_ternfall_01', 'S01E001', 600);
+
+  assert.ok(audioScript.includes('loudnorm=I=-14'));
+  assert.ok(audioScript.includes('stem_01_mechanical_pulse.wav'));
+  assert.ok(audioScript.includes('stem_02_rain_foley.wav'));
+  assert.ok(audioScript.includes('stem_03_tension_drone.wav'));
+});
+
+test('generateCompleteYouTubeRenderScript: creates master 16:9 and vertical 9:16 Short', () => {
+  const renderScript = generateCompleteYouTubeRenderScript('proj_ternfall_01', 'S01E001', 24);
+
+  assert.ok(renderScript.includes('1080p_24fps_Master.mp4'));
+  assert.ok(renderScript.includes('YouTube_Short_Vertical_1080x1920.mp4'));
+  assert.ok(renderScript.includes('scale=1080:1920'));
+});
+
+test('generateYouTubeMetadataPackage: formats high-CTR titles, chapters, and required disclosures', () => {
+  const pkg = generateYouTubeMetadataPackage('S01E001', 'The Eight-Beat Failure', 'Rhea discovers silent alarm.');
+
+  assert.equal(pkg.titles.length, 3);
+  assert.ok(pkg.selectedTitle.includes('The Eight-Beat Failure'));
+  assert.ok(pkg.description.includes('00:00'));
+  assert.ok(pkg.description.includes('CHAPTER TIMESTAMPS'));
+  assert.ok(pkg.syntheticMediaDisclosure.length > 20);
+  assert.ok(pkg.tags.includes('Ternfall'));
+});
+
+test('computeFlowCheckpoint: calculates accurate progress and resume batch index', () => {
+  const plan = createGoogleFlowPlan('S01E001', 'The Eight-Beat Failure', 60, 24, 'keyframe_storyboard');
+  // 3 batches total
+  plan.batches[0].status = 'verified';
+
+  const checkpoint = computeFlowCheckpoint(plan);
+  assert.equal(checkpoint.episodeId, 'S01E001');
+  assert.equal(checkpoint.totalBatches, 3);
+  assert.deepEqual(checkpoint.completedBatchIndices, [1]);
+  assert.equal(checkpoint.lastCompletedBatchIndex, 1);
+  assert.equal(checkpoint.nextBatchIndex, 2);
+  assert.equal(checkpoint.isComplete, false);
+
+  const resumePoint = computeFlowResumePoint(checkpoint);
+  assert.equal(resumePoint.shouldResume, true);
+  assert.equal(resumePoint.nextBatchIndex, 2);
+  assert.equal(resumePoint.remainingBatches, 2);
+});
+
+test('createFlowAutoproduceOrchestrator: sequences end-to-end pipeline with zero billable API cost', () => {
+  const result = createFlowAutoproduceOrchestrator(
+    'proj_ternfall_01',
+    'S01E001',
+    'The Eight-Beat Failure',
+    'When the city alarm falls silent...',
+    { durationSeconds: 600, fps: 24 }
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.episodeId, 'S01E001');
+  assert.equal(result.stageReached, 'packaged');
+  assert.equal(result.billableCostUsd, 0); // Strict $0.00
+  assert.equal(result.totalBatchesProcessed, 600);
+  assert.equal(result.totalFramesVerified, 14400);
+  assert.ok(result.master16x9Path.includes('1080p_24fps_Master.mp4'));
+  assert.ok(result.short9x16Path.includes('YouTube_Short_Vertical_1080x1920.mp4'));
+  assert.equal(result.qcStatus.loudnessLufs, -14.0);
+  assert.equal(result.qcStatus.passed, true);
+});
+

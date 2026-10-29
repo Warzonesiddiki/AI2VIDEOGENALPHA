@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   ExternalLink,
   Layers,
+  Tv,
 } from 'lucide-react';
 
 export type ActiveTab =
@@ -24,6 +25,7 @@ export type ActiveTab =
   | 'episodes'
   | 'script_editor'
   | 'research_room'
+  | 'video_essay'
   | 'scene_planner'
   | 'google_flow'
   | 'autoproducer'
@@ -62,8 +64,9 @@ export const Navigation: React.FC<NavigationProps> = ({
     {
       title: 'MEDIA & PRODUCTION',
       items: [
+        { id: 'video_essay' as ActiveTab, label: 'Video Essay (PPT+Voice)', icon: Tv, badge: '0-Credits' },
         { id: 'scene_planner' as ActiveTab, label: 'Storyboard & Audio', icon: LayoutGrid },
-        { id: 'google_flow' as ActiveTab, label: 'Google Flow (24fps)', icon: Layers },
+        { id: 'google_flow' as ActiveTab, label: 'Master Video & Shorts', icon: Film, badge: '24fps' },
         { id: 'autoproducer' as ActiveTab, label: 'Autoproducer', icon: Bot },
         {
           id: 'jobs_queue' as ActiveTab,

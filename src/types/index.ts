@@ -504,6 +504,31 @@ export interface SystemDiagnostics {
   runtimeEnvironment: 'cloud_preview' | 'local_windows' | 'local_wsl2' | 'local_linux';
   nodeVersion: string;
   osPlatform: string;
+  hardwareProfile?: {
+    computerName: string;
+    machineModel: string;
+    cpuModel: string;
+    cpuCores: number;
+    cpuThreads: number;
+    cpuMaxTurboGhz: number;
+    coolingSolution: string;
+    thermalStatus: string;
+    ramTotalGb: number;
+    ramConfig: string;
+    ramScratchAllocatedGb: number;
+    ramHeadroomGb: number;
+    gpuName: string;
+    gpuVramGb: number;
+    gpuArchitecture: string;
+    secondaryGpu: string;
+    nvmeModel: string;
+    nvmeSpeed: string;
+    nvencSupported: boolean;
+    nvencCodec: string;
+    recommendedFps: number;
+    recommendedConcatMode: string;
+    ffmpegNvencPreset: string;
+  };
   storage: {
     productionRoot: string;
     isWritable: boolean;
@@ -557,6 +582,9 @@ export interface GoogleFlowAccount {
   batchesAssigned: number;
   batchesCompleted: number;
   status: 'active' | 'quota_exhausted' | 'idle';
+  creditsBalance: number; // 1,050 credits per account
+  dailyCreditsRefill: number; // +50 credits daily per account
+  creditsUsedToday: number;
   lastActivityAt?: string;
 }
 
@@ -609,6 +637,15 @@ export interface GoogleFlowPlan {
   batchSize: 24;
   accounts: Record<FlowAccountSlot, GoogleFlowAccount>;
   batches: GoogleFlowBatch[];
+  creditEconomics?: {
+    totalCreditsPool: number; // 3,150 credits
+    dailyCreditsRefillRate: number; // +150 credits/day
+    estimatedCreditsBurnPerEpisode: number; // 150 in Hybrid, 300 in Full Veo
+    projectedRunwayDays: number | string; // 'Perpetual (Net 0 Burn)'
+    activeStrategy: 'sustainable_hybrid' | 'full_veo' | 'conservative';
+    heroVeoClipsCount: number;
+    imagenMotionScenesCount: number;
+  };
   summary: {
     totalFramesIngested: number;
     completionPercentage: number;
@@ -623,3 +660,46 @@ export interface GoogleFlowPlan {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface GoogleFlowCheckpoint {
+  episodeId: string;
+  totalBatches: number;
+  totalFramesExpected: number;
+  completedBatchIndices: number[];
+  lastCompletedBatchIndex: number;
+  nextBatchIndex: number;
+  accountStats: Record<FlowAccountSlot, { assigned: number; completed: number }>;
+  isComplete: boolean;
+  updatedAt: string;
+}
+
+export interface FlowAutoproduceResult {
+  success: boolean;
+  episodeId: string;
+  stageReached: 'planned' | 'frames_ingested' | 'audio_synthesized' | 'master_rendered' | 'packaged';
+  plan: GoogleFlowPlan;
+  checkpoint: GoogleFlowCheckpoint;
+  audioMixPath: string;
+  master16x9Path: string;
+  short9x16Path: string;
+  youtubePackage: {
+    titles: string[];
+    selectedTitle: string;
+    description: string;
+    tags: string[];
+    pinnedComment: string;
+    syntheticMediaDisclosure: string;
+  };
+  qcStatus: {
+    resolution: string;
+    fps: number;
+    loudnessLufs: number;
+    passed: boolean;
+  };
+  totalFramesVerified: number;
+  totalBatchesProcessed: number;
+  billableCostUsd: 0;
+  message: string;
+}
+
+

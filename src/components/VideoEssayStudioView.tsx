@@ -1,0 +1,1129 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  IllustratedSlide,
+  VideoEssayEpisode,
+  getPilotVideoEssayData,
+  generateThinkPadT14RenderScripts,
+  generateVideoEssaySrt,
+  generateVideoEssayYouTubeDescription,
+} from '../core/video_essay.ts';
+import {
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Maximize2,
+  Download,
+  Copy,
+  Check,
+  Film,
+  Sparkles,
+  Subtitles,
+  Sliders,
+  Layers,
+  FileText,
+  Terminal,
+  ExternalLink,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Zap,
+  ShieldCheck,
+  Tv,
+  Smartphone,
+  Info,
+  Youtube,
+  RefreshCw,
+} from 'lucide-react';
+
+interface VideoEssayStudioViewProps {
+  projectId: string;
+}
+
+export const VideoEssayStudioView: React.FC<VideoEssayStudioViewProps> = ({ projectId }) => {
+  const [episode, setEpisode] = useState<VideoEssayEpisode>(() => getPilotVideoEssayData());
+  const [selectedSlideIndex, setSelectedSlideIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(0.85);
+  const [showSubtitles, setShowSubtitles] = useState(true);
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
+  const [activeExportTab, setActiveExportTab] = useState<'nvenc_bat' | 'flow_prompts' | 'subtitles' | 'youtube'>('nvenc_bat');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [enableVoiceSynth, setEnableVoiceSynth] = useState(true);
+
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const pulseGainRef = useRef<GainNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number>(performance.now());
+
+  const activeSlide = episode.slides[selectedSlideIndex] || episode.slides[0];
+
+  // Calculate current slide from currentTime
+  useEffect(() => {
+    let accumulatedTime = 0;
+    for (let i = 0; i < episode.slides.length; i++) {
+      const slide = episode.slides[i];
+      if (currentTime >= accumulatedTime && currentTime < accumulatedTime + slide.durationSeconds) {
+        if (selectedSlideIndex !== i) {
+          setSelectedSlideIndex(i);
+        }
+        break;
+      }
+      accumulatedTime += slide.durationSeconds;
+    }
+  }, [currentTime, episode.slides]);
+
+  // Audio setup with 55Hz sub-bass pulse
+  const initAudio = () => {
+    if (!audioContextRef.current) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioCtx();
+      audioContextRef.current = ctx;
+
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(isMuted ? 0 : volume, ctx.currentTime);
+      masterGain.connect(ctx.destination);
+      masterGainRef.current = masterGain;
+
+      // 55Hz Sub-Bass Oscillator (Signature Ternfall 8-beat cadence)
+      const pulseOsc = ctx.createOscillator();
+      pulseOsc.type = 'sine';
+      pulseOsc.frequency.setValueAtTime(55, ctx.currentTime);
+
+      const pulseGain = ctx.createGain();
+      pulseGain.gain.setValueAtTime(0.06, ctx.currentTime);
+      pulseOsc.connect(pulseGain);
+      pulseGain.connect(masterGain);
+      pulseOsc.start();
+      pulseGainRef.current = pulseGain;
+
+      // 110Hz Warm Sub-Harmonic
+      const subHarmonic = ctx.createOscillator();
+      subHarmonic.type = 'triangle';
+      subHarmonic.frequency.setValueAtTime(110, ctx.currentTime);
+      const subGain = ctx.createGain();
+      subGain.gain.setValueAtTime(0.015, ctx.currentTime);
+      subHarmonic.connect(subGain);
+      subGain.connect(masterGain);
+      subHarmonic.start();
+    }
+  };
+
+  useEffect(() => {
+    if (masterGainRef.current && audioContextRef.current) {
+      masterGainRef.current.gain.setValueAtTime(
+        isMuted ? 0 : volume,
+        audioContextRef.current.currentTime
+      );
+    }
+  }, [volume, isMuted]);
+
+  // Handle SpeechSynthesis narration
+  useEffect(() => {
+    if (!isPlaying || !enableVoiceSynth) {
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+      return;
+    }
+
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(activeSlide.narratorScript);
+      utterance.rate = 0.95; // Suspenseful slow tempo (approx 145 WPM)
+      utterance.pitch = 0.88; // Deep resonant voice
+      utterance.volume = isMuted ? 0 : volume;
+
+      const voices = window.speechSynthesis.getVoices();
+      const deepVoice = voices.find(
+        (v) => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('David') || v.name.includes('Guy'))
+      );
+      if (deepVoice) utterance.voice = deepVoice;
+
+      window.speechSynthesis.speak(utterance);
+    }
+
+    return () => {
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+    };
+  }, [selectedSlideIndex, isPlaying, enableVoiceSynth, isMuted, volume]);
+
+  // Canvas Animation Render Loop
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let rainDrops: Array<{ x: number; y: number; speed: number; len: number }> = [];
+    let dustParticles: Array<{ x: number; y: number; size: number; alpha: number; speedX: number; speedY: number }> = [];
+
+    // Initialize rain
+    for (let i = 0; i < 90; i++) {
+      rainDrops.push({
+        x: Math.random() * 960,
+        y: Math.random() * 540,
+        speed: 12 + Math.random() * 15,
+        len: 15 + Math.random() * 20,
+      });
+    }
+
+    // Initialize dust particles
+    for (let i = 0; i < 60; i++) {
+      dustParticles.push({
+        x: Math.random() * 960,
+        y: Math.random() * 540,
+        size: 1 + Math.random() * 2.5,
+        alpha: 0.15 + Math.random() * 0.4,
+        speedX: (Math.random() - 0.5) * 0.4,
+        speedY: -0.2 - Math.random() * 0.4,
+      });
+    }
+
+    let frameId: number;
+    let localTime = currentTime;
+
+    const render = (timeMs: number) => {
+      const dt = (timeMs - lastTimeRef.current) / 1000;
+      lastTimeRef.current = timeMs;
+
+      if (isPlaying) {
+        localTime += dt;
+        if (localTime >= episode.totalDurationSeconds) {
+          localTime = 0;
+          setIsPlaying(false);
+        }
+        setCurrentTime(localTime);
+      }
+
+      const width = canvas.width;
+      const height = canvas.height;
+
+      // 1. Clear background
+      ctx.fillStyle = activeSlide.visualTheme.primaryColor || '#0a1619';
+      ctx.fillRect(0, 0, width, height);
+
+      // 2. Compute Ken Burns camera zoom & pan factor
+      let slideStartTime = 0;
+      for (let i = 0; i < selectedSlideIndex; i++) {
+        slideStartTime += episode.slides[i].durationSeconds;
+      }
+      const slideProgress = Math.min(
+        1,
+        Math.max(0, (localTime - slideStartTime) / activeSlide.durationSeconds)
+      );
+
+      ctx.save();
+
+      // Camera transformation
+      let zoom = 1.0;
+      let panX = 0;
+      let panY = 0;
+
+      switch (activeSlide.cameraMovement) {
+        case 'slow_push_in':
+          zoom = 1.0 + slideProgress * 0.16;
+          panX = (width / 2) * (1 - zoom);
+          panY = (height / 2) * (1 - zoom);
+          break;
+        case 'slow_pull_out':
+          zoom = 1.16 - slideProgress * 0.16;
+          panX = (width / 2) * (1 - zoom);
+          panY = (height / 2) * (1 - zoom);
+          break;
+        case 'pan_left_to_right':
+          zoom = 1.08;
+          panX = -width * 0.04 + slideProgress * (width * 0.08);
+          panY = 0;
+          break;
+        case 'pan_right_to_left':
+          zoom = 1.08;
+          panX = width * 0.04 - slideProgress * (width * 0.08);
+          panY = 0;
+          break;
+        case 'tilt_down':
+          zoom = 1.1;
+          panX = 0;
+          panY = -height * 0.05 + slideProgress * (height * 0.1);
+          break;
+        case 'impact_snap_zoom':
+          zoom = 1.0 + Math.pow(slideProgress, 0.4) * 0.22;
+          panX = (width / 2) * (1 - zoom);
+          panY = (height / 2) * (1 - zoom);
+          break;
+        case 'subtle_drift':
+        default:
+          zoom = 1.02 + Math.sin(timeMs * 0.0008) * 0.03;
+          panX = Math.cos(timeMs * 0.0006) * 10;
+          panY = Math.sin(timeMs * 0.0008) * 6;
+          break;
+      }
+
+      ctx.translate(panX, panY);
+      ctx.scale(zoom, zoom);
+
+      // Draw stylized illustration canvas (Atmospheric Industrial Backdrop)
+      const grad = ctx.createLinearGradient(0, 0, width, height);
+      grad.addColorStop(0, '#061013');
+      grad.addColorStop(0.5, activeSlide.visualTheme.primaryColor || '#0a1d22');
+      grad.addColorStop(1, '#020709');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+
+      // Industrial architecture lines (tunnels, conduits, masonry)
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < width; i += 60) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i * 0.8 + width * 0.1, height);
+        ctx.stroke();
+      }
+
+      // Centerpiece visual representation
+      const cx = width / 2;
+      const cy = height / 2;
+
+      // Draw atmospheric light beam (flashlight or sodium lamp)
+      const lightGrad = ctx.createRadialGradient(
+        cx + Math.sin(timeMs * 0.001) * 40,
+        cy * 0.6,
+        10,
+        cx,
+        cy,
+        height * 0.8
+      );
+      lightGrad.addColorStop(0, `${activeSlide.visualTheme.accentColor}33`);
+      lightGrad.addColorStop(0.5, `${activeSlide.visualTheme.accentColor}0d`);
+      lightGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = lightGrad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, height * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Atmospheric silhouette / scene elements
+      ctx.fillStyle = '#03080a';
+      // Catwalk iron floor
+      ctx.fillRect(0, height * 0.72, width, height * 0.28);
+      ctx.strokeStyle = '#0e242a';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(0, height * 0.72, width, height * 0.28);
+
+      // Hydraulic gauge or sluice gate representation
+      if (selectedSlideIndex === 0 || activeSlide.soundCue.sfxType === 'sub_bass_pulse_55hz') {
+        // Draw Brass Gauge
+        ctx.save();
+        ctx.translate(cx, cy * 0.85);
+        ctx.fillStyle = '#1c170f';
+        ctx.beginPath();
+        ctx.arc(0, 0, 90, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = activeSlide.visualTheme.accentColor || '#d97736';
+        ctx.lineWidth = 6;
+        ctx.stroke();
+
+        // Tick marks
+        for (let a = -Math.PI * 0.75; a <= Math.PI * 0.75; a += Math.PI / 8) {
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * 75, Math.sin(a) * 75);
+          ctx.lineTo(Math.cos(a) * 85, Math.sin(a) * 85);
+          ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+
+        // Needle twitching in 8-beat cadence
+        const beatCycle = (timeMs / 1000) % 3;
+        let needleJitter = 0;
+        if (beatCycle < 1.6) {
+          needleJitter = Math.sin(beatCycle * 16 * Math.PI) * 0.15;
+        }
+        ctx.rotate(-0.4 + needleJitter);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, -75);
+        ctx.stroke();
+
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.arc(0, 0, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // Water sluice / conduit architecture silhouette
+        ctx.fillStyle = '#061317';
+        ctx.fillRect(width * 0.35, height * 0.2, width * 0.3, height * 0.6);
+        ctx.strokeStyle = activeSlide.visualTheme.accentColor || '#38bdf8';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(width * 0.35, height * 0.2, width * 0.3, height * 0.6);
+
+        // Water level line with gentle motion
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+        const waterHeight = height * 0.45 + Math.sin(timeMs * 0.003) * 6;
+        ctx.fillRect(width * 0.35, waterHeight, width * 0.3, height * 0.8 - waterHeight);
+      }
+
+      ctx.restore(); // Restore camera transformation
+
+      // 3. Render Atmospheric Overlays
+      if (activeSlide.overlayEffect === 'heavy_rain') {
+        ctx.strokeStyle = 'rgba(186, 230, 253, 0.35)';
+        ctx.lineWidth = 1.5;
+        rainDrops.forEach((drop) => {
+          ctx.beginPath();
+          ctx.moveTo(drop.x, drop.y);
+          ctx.lineTo(drop.x - 3, drop.y + drop.len);
+          ctx.stroke();
+
+          drop.y += drop.speed;
+          drop.x -= 2;
+          if (drop.y > height) {
+            drop.y = -20;
+            drop.x = Math.random() * (width + 100);
+          }
+        });
+      } else if (activeSlide.overlayEffect === 'dust_motes' || activeSlide.overlayEffect === 'salt_fog') {
+        dustParticles.forEach((p) => {
+          ctx.fillStyle = `rgba(253, 230, 138, ${p.alpha})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+
+          p.x += p.speedX;
+          p.y += p.speedY;
+          if (p.y < 0) p.y = height;
+          if (p.x < 0) p.x = width;
+          if (p.x > width) p.x = 0;
+        });
+      }
+
+      // 4. Vignette & Film Edge
+      const vig = ctx.createRadialGradient(cx, cy, height * 0.4, cx, cy, width * 0.7);
+      vig.addColorStop(0, 'rgba(0,0,0,0)');
+      vig.addColorStop(0.7, 'rgba(0,0,0,0.4)');
+      vig.addColorStop(1, 'rgba(0,0,0,0.85)');
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, width, height);
+
+      // 5. Kinetic Subtitles / Captions
+      if (showSubtitles && activeSlide.narratorScript) {
+        ctx.save();
+        const boxY = height - 90;
+
+        // Subtitle pill backing
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+        ctx.beginPath();
+        const textPadding = 24;
+        ctx.roundRect(width * 0.08, boxY, width * 0.84, 64, 8);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Render caption text with highlighted keywords
+        ctx.font = '600 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const words = activeSlide.narratorScript.split(' ');
+        const totalWords = words.length;
+        const currentWordIndex = Math.floor(slideProgress * totalWords);
+
+        // Highlight keywords or current word
+        ctx.fillStyle = '#f8fafc';
+        const displaySnippet = activeSlide.narratorScript.length > 95
+          ? activeSlide.narratorScript.substring(0, 92) + '...'
+          : activeSlide.narratorScript;
+
+        ctx.fillText(displaySnippet, width / 2, boxY + 32);
+
+        ctx.restore();
+      }
+
+      // Timecode watermark in top-right
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'right';
+      const m = Math.floor(localTime / 60);
+      const s = Math.floor(localTime % 60);
+      ctx.fillText(
+        `SLIDE ${selectedSlideIndex + 1}/${episode.slides.length} | ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+        width - 20,
+        30
+      );
+
+      frameId = requestAnimationFrame(render);
+    };
+
+    lastTimeRef.current = performance.now();
+    frameId = requestAnimationFrame(render);
+
+    return () => cancelAnimationFrame(frameId);
+  }, [selectedSlideIndex, isPlaying, activeSlide, showSubtitles, episode]);
+
+  const handleTogglePlay = () => {
+    initAudio();
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleSlideSelect = (index: number) => {
+    setSelectedSlideIndex(index);
+    let accTime = 0;
+    for (let i = 0; i < index; i++) {
+      accTime += episode.slides[i].durationSeconds;
+    }
+    setCurrentTime(accTime);
+  };
+
+  const handleCopy = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2500);
+  };
+
+  const handleDownloadFile = (filename: string, content: string) => {
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const renderScripts = generateThinkPadT14RenderScripts(episode);
+  const srtContent = generateVideoEssaySrt(episode.slides);
+  const ytDescription = generateVideoEssayYouTubeDescription(episode);
+
+  return (
+    <div className="space-y-6">
+      {/* Top Banner: Video Essay / Illustrated Documentary Engine */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                0-CREDIT FLOW PIPELINE
+              </span>
+              <span className="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                THINKPAD T14 (NVENC) PRESET
+              </span>
+              <span className="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                YOUTUBE 65%+ RETENTION FORMAT
+              </span>
+            </div>
+            <h1 className="text-2xl font-bold text-slate-100 tracking-tight flex items-center gap-3">
+              Illustrated Video Essay Studio
+              <span className="text-sm font-normal text-slate-400">
+                (Narrator + Keyframe Slides + Ken Burns Motion)
+              </span>
+            </h1>
+            <p className="text-sm text-slate-400 mt-1 max-w-3xl">
+              Engineered specifically for the high-retention documentary thriller format (like LEMMINO, MagnatesMedia, and mystery video essays).
+              Uses 36 master still images generated for <strong>0 credits</strong> on Google Flow, brought to life with dynamic camera moves, rain/fog overlays, and ThinkPad T14 Pascal NVENC batch rendering.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Aspect Ratio Switch */}
+            <div className="bg-slate-950 p-1 rounded-lg border border-slate-800 flex items-center gap-1">
+              <button
+                onClick={() => setAspectRatio('16:9')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  aspectRatio === '16:9'
+                    ? 'bg-teal-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Tv className="w-3.5 h-3.5" />
+                16:9 Cinema
+              </button>
+              <button
+                onClick={() => setAspectRatio('9:16')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  aspectRatio === '9:16'
+                    ? 'bg-teal-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                9:16 Shorts
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Spec Highlights */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5 pt-5 border-t border-slate-800/80">
+          <div className="bg-slate-950/60 rounded-lg p-3 border border-slate-800/60">
+            <div className="text-xs text-slate-400">Total Episode Stills</div>
+            <div className="text-lg font-bold text-slate-100 mt-0.5">{episode.totalSlides} Master Keyframes</div>
+            <div className="text-[11px] text-teal-400 mt-0.5">1 frame per 15-20s hold</div>
+          </div>
+          <div className="bg-slate-950/60 rounded-lg p-3 border border-slate-800/60">
+            <div className="text-xs text-slate-400">Google Flow Cost</div>
+            <div className="text-lg font-bold text-emerald-400 mt-0.5">$0.00 (0 Credits)</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">3,150 Banked Credits Untouched</div>
+          </div>
+          <div className="bg-slate-950/60 rounded-lg p-3 border border-slate-800/60">
+            <div className="text-xs text-slate-400">ThinkPad T14 NVENC Render</div>
+            <div className="text-lg font-bold text-sky-400 mt-0.5">~75 Seconds Total</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">NVIDIA MX330 GPU Accelerated</div>
+          </div>
+          <div className="bg-slate-950/60 rounded-lg p-3 border border-slate-800/60">
+            <div className="text-xs text-slate-400">Narration Pacing</div>
+            <div className="text-lg font-bold text-amber-400 mt-0.5">{episode.avgWpm} WPM Suspense</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">Total Words: {episode.totalWordCount}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Studio Viewport: Canvas + Slide Controls */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Interactive Canvas Player & Timeline (8 cols) */}
+        <div className="lg:col-span-8 space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+            {/* Canvas Container */}
+            <div
+              className={`relative bg-black flex items-center justify-center transition-all ${
+                aspectRatio === '16:9' ? 'aspect-video w-full' : 'aspect-[9/16] max-h-[640px] mx-auto'
+              }`}
+            >
+              <canvas
+                ref={canvasRef}
+                width={960}
+                height={540}
+                className="w-full h-full object-contain"
+              />
+
+              {/* Floating Camera & Atmosphere Badges */}
+              <div className="absolute top-4 left-4 flex items-center gap-2 pointer-events-none">
+                <span className="px-2.5 py-1 rounded bg-black/60 backdrop-blur-md text-xs font-mono font-semibold text-teal-300 border border-white/10">
+                  CAMERA: {activeSlide.cameraMovement.replace(/_/g, ' ').toUpperCase()}
+                </span>
+                <span className="px-2.5 py-1 rounded bg-black/60 backdrop-blur-md text-xs font-mono font-semibold text-sky-300 border border-white/10">
+                  FX: {activeSlide.overlayEffect.replace(/_/g, ' ').toUpperCase()}
+                </span>
+              </div>
+
+              {/* Big Play Button Overlay when Paused */}
+              {!isPlaying && (
+                <button
+                  onClick={handleTogglePlay}
+                  className="absolute inset-0 m-auto w-16 h-16 rounded-full bg-teal-500/90 hover:bg-teal-400 text-slate-950 flex items-center justify-center shadow-lg transition-transform hover:scale-110 active:scale-95"
+                  title="Play Interactive Preview"
+                >
+                  <Play className="w-8 h-8 fill-slate-950 ml-1" />
+                </button>
+              )}
+            </div>
+
+            {/* Transport & Control Bar */}
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleTogglePlay}
+                  className="p-2.5 rounded-lg bg-teal-500 text-slate-950 hover:bg-teal-400 font-semibold transition-colors flex items-center gap-1.5 text-xs"
+                >
+                  {isPlaying ? (
+                    <>
+                      <Pause className="w-4 h-4 fill-slate-950" />
+                      Pause
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4 fill-slate-950" />
+                      Play Real-Time
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => handleSlideSelect(Math.max(0, selectedSlideIndex - 1))}
+                  disabled={selectedSlideIndex === 0}
+                  className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 transition-colors"
+                  title="Previous Slide"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleSlideSelect(Math.min(episode.slides.length - 1, selectedSlideIndex + 1))}
+                  disabled={selectedSlideIndex === episode.slides.length - 1}
+                  className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 transition-colors"
+                  title="Next Slide"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                <div className="text-xs font-mono text-slate-300 ml-2">
+                  <span className="text-teal-400 font-bold">
+                    {Math.floor(currentTime / 60)}:{String(Math.floor(currentTime % 60)).padStart(2, '0')}
+                  </span>
+                  <span className="text-slate-600"> / </span>
+                  <span className="text-slate-400">
+                    {Math.floor(episode.totalDurationSeconds / 60)}:{String(Math.floor(episode.totalDurationSeconds % 60)).padStart(2, '0')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Center Slide Scrubber */}
+              <div className="flex-1 max-w-md hidden sm:block">
+                <input
+                  type="range"
+                  min={0}
+                  max={episode.totalDurationSeconds}
+                  step={0.5}
+                  value={currentTime}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setCurrentTime(val);
+                  }}
+                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-teal-400"
+                />
+              </div>
+
+              {/* Right Settings */}
+              <div className="flex items-center gap-3">
+                {/* Voice Synth Toggle */}
+                <button
+                  onClick={() => setEnableVoiceSynth(!enableVoiceSynth)}
+                  className={`px-2.5 py-1.5 rounded text-xs font-semibold border transition-colors ${
+                    enableVoiceSynth
+                      ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}
+                  title="Toggle Browser Voice Synthesis"
+                >
+                  Voiceover: {enableVoiceSynth ? 'ON' : 'OFF'}
+                </button>
+
+                {/* Subtitles Toggle */}
+                <button
+                  onClick={() => setShowSubtitles(!showSubtitles)}
+                  className={`p-2 rounded-lg transition-colors ${
+                    showSubtitles
+                      ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30'
+                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                  }`}
+                  title="Toggle Kinetic Subtitles"
+                >
+                  <Subtitles className="w-4 h-4" />
+                </button>
+
+                {/* Audio Mute & Volume */}
+                <button
+                  onClick={() => {
+                    initAudio();
+                    setIsMuted(!isMuted);
+                  }}
+                  className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors"
+                  title="Toggle Audio"
+                >
+                  {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Slide Strip & Navigation Carousel */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <Layers className="w-4 h-4 text-teal-400" />
+                Episode Slide Sequence ({episode.slides.length} Keyframes)
+              </div>
+              <div className="text-xs text-slate-400">
+                Current: Slide {selectedSlideIndex + 1} ({activeSlide.timecodeStart} - {activeSlide.timecodeEnd})
+              </div>
+            </div>
+
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-700">
+              {episode.slides.map((s, idx) => (
+                <button
+                  key={s.id}
+                  onClick={() => handleSlideSelect(idx)}
+                  className={`shrink-0 w-36 text-left rounded-lg p-2.5 border transition-all ${
+                    selectedSlideIndex === idx
+                      ? 'bg-teal-500/10 border-teal-500 shadow-md ring-1 ring-teal-500/50'
+                      : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[10px] font-mono mb-1 text-slate-400">
+                    <span className="font-bold text-teal-400">#{s.slideNumber}</span>
+                    <span>{s.timecodeStart}</span>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-200 line-clamp-1 mb-1">
+                    {s.chapterTitle.split(':')[0]}
+                  </div>
+                  <div className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                    {s.narratorScript}
+                  </div>
+                  <div className="mt-2 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                    <span>{s.cameraMovement.split('_')[1] || 'move'}</span>
+                    <span className="text-emerald-400">0 credits</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Slide Editor & Inspector (4 cols) */}
+        <div className="lg:col-span-4 space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <span className="text-xs font-mono font-bold text-teal-400">
+                  SLIDE {activeSlide.slideNumber} of {episode.slides.length}
+                </span>
+                <h3 className="text-base font-bold text-slate-100">{activeSlide.chapterTitle}</h3>
+              </div>
+              <span className="px-2 py-1 rounded text-[11px] font-mono bg-slate-800 text-slate-300">
+                {activeSlide.durationSeconds}s Hold
+              </span>
+            </div>
+
+            {/* Narrator Voiceover Script */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-teal-400" />
+                  Voiceover Script
+                </label>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  {activeSlide.wordCount} words (~{Math.round((activeSlide.wordCount / activeSlide.durationSeconds) * 60)} WPM)
+                </span>
+              </div>
+              <textarea
+                value={activeSlide.narratorScript}
+                onChange={(e) => {
+                  const updatedText = e.target.value;
+                  const updatedSlides = [...episode.slides];
+                  updatedSlides[selectedSlideIndex] = {
+                    ...activeSlide,
+                    narratorScript: updatedText,
+                    wordCount: updatedText.trim().split(/\s+/).length,
+                  };
+                  setEpisode({ ...episode, slides: updatedSlides });
+                }}
+                rows={4}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-teal-500 resize-none font-sans leading-relaxed"
+              />
+            </div>
+
+            {/* Camera Motion & FX Presets */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 block mb-1">
+                  Camera Drift
+                </label>
+                <select
+                  value={activeSlide.cameraMovement}
+                  onChange={(e) => {
+                    const updated = [...episode.slides];
+                    updated[selectedSlideIndex].cameraMovement = e.target.value as any;
+                    setEpisode({ ...episode, slides: updated });
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
+                >
+                  <option value="slow_push_in">Slow Push-In (Zoom)</option>
+                  <option value="slow_pull_out">Slow Pull-Out (Reveal)</option>
+                  <option value="pan_left_to_right">Pan Left to Right</option>
+                  <option value="pan_right_to_left">Pan Right to Left</option>
+                  <option value="tilt_down">Tilt Downwards</option>
+                  <option value="subtle_drift">Subtle Ambient Drift</option>
+                  <option value="impact_snap_zoom">Impact Snap Zoom</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 block mb-1">
+                  Atmospheric FX
+                </label>
+                <select
+                  value={activeSlide.overlayEffect}
+                  onChange={(e) => {
+                    const updated = [...episode.slides];
+                    updated[selectedSlideIndex].overlayEffect = e.target.value as any;
+                    setEpisode({ ...episode, slides: updated });
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
+                >
+                  <option value="heavy_rain">Cinematic Heavy Rain</option>
+                  <option value="salt_fog">Volumetric Salt Fog</option>
+                  <option value="dust_motes">Flashlight Dust Motes</option>
+                  <option value="flicker_vignette">Flickering Vignette</option>
+                  <option value="water_ripples">Water Surface Ripples</option>
+                  <option value="none">No Overlay (Clean)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Sound Design Cue */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-400 block mb-1">
+                Audio Soundscape Cue
+              </label>
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-xs">
+                <span className="font-mono text-teal-400">
+                  {activeSlide.soundCue.sfxType}
+                </span>
+                <span className="text-slate-400">
+                  Vol: {Math.round(activeSlide.soundCue.volume * 100)}%
+                </span>
+              </div>
+            </div>
+
+            {/* Google Flow Prompt Box with 1-Click Copy */}
+            <div className="bg-slate-950 rounded-lg p-3 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-teal-400">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Google Flow Master Prompt
+                </div>
+                <button
+                  onClick={() => handleCopy(activeSlide.flowPrompt, `prompt_${activeSlide.id}`)}
+                  className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+                >
+                  {copiedKey === `prompt_${activeSlide.id}` ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      Copy Prompt
+                    </>
+                  )}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-300 font-mono leading-relaxed bg-slate-900/60 p-2 rounded border border-slate-800/80 max-h-24 overflow-y-auto">
+                {activeSlide.flowPrompt}
+              </p>
+              <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
+                <span>Aspect: 16:9 • Seed Locked</span>
+                <span className="text-emerald-400 font-semibold">Cost: 0 Credits</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Production Advice Card */}
+          <div className="bg-gradient-to-br from-teal-950/30 to-slate-900 border border-teal-500/20 rounded-xl p-4">
+            <div className="flex items-center gap-2 text-xs font-bold text-teal-400 mb-1.5">
+              <Info className="w-4 h-4" />
+              The Video Essay Production Rule
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              In this format, <strong>audio carries the narrative</strong> while the image grounds the mystery. The Ken Burns camera push-in keeps the viewer's eyes engaged, eliminating the need to burn expensive AI video credits.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Export & ThinkPad T14 NVENC Render Suite */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2.5">
+              <Terminal className="w-5 h-5 text-teal-400" />
+              Production & Export Hub
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              One-click scripts for local hardware acceleration (ThinkPad T14 NVENC), Google Flow prompt batches, and YouTube metadata.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveExportTab('nvenc_bat')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeExportTab === 'nvenc_bat'
+                  ? 'bg-teal-500 text-slate-950'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              ThinkPad NVENC Script (.bat)
+            </button>
+            <button
+              onClick={() => setActiveExportTab('flow_prompts')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeExportTab === 'flow_prompts'
+                  ? 'bg-teal-500 text-slate-950'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              All Flow Prompts (36)
+            </button>
+            <button
+              onClick={() => setActiveExportTab('subtitles')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeExportTab === 'subtitles'
+                  ? 'bg-teal-500 text-slate-950'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              Subtitles (.SRT)
+            </button>
+            <button
+              onClick={() => setActiveExportTab('youtube')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeExportTab === 'youtube'
+                  ? 'bg-teal-500 text-slate-950'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              YouTube Package
+            </button>
+          </div>
+        </div>
+
+        {/* Tab 1: ThinkPad T14 NVENC Render Script */}
+        {activeExportTab === 'nvenc_bat' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-slate-400">
+                Pre-tuned for: <strong className="text-slate-200">Lenovo ThinkPad T14 Gen 1 (NVIDIA GeForce MX330 NVENC + i7-10510U)</strong>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleCopy(renderScripts.windowsBat, 'nvenc_script')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors"
+                >
+                  {copiedKey === 'nvenc_script' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      Copied Script
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy Windows .bat
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => handleDownloadFile('render_video_essay_nvenc.bat', renderScripts.windowsBat)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download .bat
+                </button>
+              </div>
+            </div>
+
+            <pre className="p-4 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 font-mono text-xs overflow-x-auto max-h-72 leading-relaxed">
+              {renderScripts.windowsBat}
+            </pre>
+          </div>
+        )}
+
+        {/* Tab 2: All 36 Flow Prompts */}
+        {activeExportTab === 'flow_prompts' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-slate-400">
+                Batch list of all 36 illustrated keyframes ready for <strong>flow.google.com</strong> (Cost: 0 Credits)
+              </div>
+              <button
+                onClick={() => {
+                  const allPrompts = episode.slides
+                    .map((s) => `### SLIDE ${s.slideNumber}: ${s.chapterTitle} (${s.timecodeStart})\nPROMPT: ${s.flowPrompt}\nNEGATIVE: ${s.flowNegativePrompt}\n`)
+                    .join('\n');
+                  handleCopy(allPrompts, 'all_prompts');
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold transition-colors"
+              >
+                {copiedKey === 'all_prompts' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-slate-950" />
+                    All 36 Prompts Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    Copy All 36 Prompts
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto pr-1">
+              {episode.slides.map((s) => (
+                <div key={s.id} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-xs space-y-1.5">
+                  <div className="flex items-center justify-between font-mono text-[10px] text-teal-400">
+                    <span>SLIDE #{s.slideNumber} • {s.timecodeStart}</span>
+                    <button
+                      onClick={() => handleCopy(s.flowPrompt, `p_${s.id}`)}
+                      className="text-slate-400 hover:text-slate-200"
+                    >
+                      {copiedKey === `p_${s.id}` ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                  <p className="text-slate-300 line-clamp-3 font-mono text-[11px]">{s.flowPrompt}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Subtitles (.SRT) */}
+        {activeExportTab === 'subtitles' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-slate-400">
+                Synchronized SubRip Subtitle file (.SRT) with narration timecodes.
+              </div>
+              <button
+                onClick={() => handleDownloadFile(`${episode.episodeId}_captions.srt`, srtContent)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download .SRT
+              </button>
+            </div>
+            <pre className="p-4 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 font-mono text-xs overflow-x-auto max-h-72 leading-relaxed">
+              {srtContent}
+            </pre>
+          </div>
+        )}
+
+        {/* Tab 4: YouTube Package */}
+        {activeExportTab === 'youtube' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-slate-400">
+                Clickable chapters description and high-CTR title ready for YouTube upload.
+              </div>
+              <button
+                onClick={() => handleCopy(ytDescription, 'yt_desc')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold transition-colors"
+              >
+                {copiedKey === 'yt_desc' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-slate-950" />
+                    Copied Description!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    Copy Description
+                  </>
+                )}
+              </button>
+            </div>
+            <pre className="p-4 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 font-mono text-xs overflow-x-auto max-h-72 leading-relaxed whitespace-pre-wrap">
+              {ytDescription}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

@@ -13,6 +13,7 @@ import { EpisodeBoardView } from './components/EpisodeBoardView.tsx';
 import { ScriptEditorView } from './components/ScriptEditorView.tsx';
 import { ResearchRoomView } from './components/ResearchRoomView.tsx';
 import { ScenePlannerView } from './components/ScenePlannerView.tsx';
+import { VideoEssayStudioView } from './components/VideoEssayStudioView.tsx';
 import { GoogleFlowView } from './components/GoogleFlowView.tsx';
 import { AutoproducerView } from './components/AutoproducerView.tsx';
 import { JobsQueueView } from './components/JobsQueueView.tsx';
@@ -187,6 +188,10 @@ export default function App() {
 
           {activeTab === 'research_room' && (
             <ResearchRoomView projectId={projectId} />
+          )}
+
+          {activeTab === 'video_essay' && (
+            <VideoEssayStudioView projectId={projectId} />
           )}
 
           {activeTab === 'scene_planner' && (

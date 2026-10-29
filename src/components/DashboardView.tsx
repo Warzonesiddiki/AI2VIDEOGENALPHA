@@ -12,6 +12,7 @@ import {
   ArrowRight,
   TrendingUp,
   ShieldCheck,
+  Tv,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -144,11 +145,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 Inspect Script
               </button>
               <button
-                onClick={() => onStartAutoproduce(pilotEpisode.id)}
-                className="px-4 py-2 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors"
+                onClick={() => onSelectTab('video_essay')}
+                className="px-4 py-2 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
               >
-                <Play className="w-3.5 h-3.5 fill-current" />
-                <span>Run Autoproducer</span>
+                <Tv className="w-3.5 h-3.5" />
+                <span>Illustrated Video Essay (0-Credit)</span>
+              </button>
+              <button
+                onClick={() => onSelectTab('google_flow')}
+                className="px-3.5 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-colors"
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>Master Video & Shorts</span>
               </button>
             </div>
           </div>
@@ -235,6 +243,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
               <ArrowRight className="w-4 h-4 text-slate-500" />
+            </button>
+
+            <button
+              onClick={() => onSelectTab('google_flow')}
+              className="w-full text-left p-3 rounded-md bg-teal-950/30 hover:bg-teal-950/50 border border-teal-500/40 hover:border-teal-500 transition-all flex items-center justify-between"
+            >
+              <div className="flex items-center gap-3">
+                <Film className="w-4 h-4 text-teal-400 shrink-0" />
+                <div>
+                  <div className="text-xs font-semibold text-teal-200">
+                    Master Video & Shorts Cockpit (24fps)
+                  </div>
+                  <div className="text-[11px] text-teal-400/80">
+                    Dual 16:9 Cinema & 9:16 Shorts player, thumbnail A/B testing, retention curve
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-teal-400" />
             </button>
 
             <button
