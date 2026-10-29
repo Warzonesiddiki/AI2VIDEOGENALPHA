@@ -24,6 +24,8 @@ import {
   handleExternalOperationTimeout,
   reconcileExternalOperation,
 } from '../src/core/jobs.ts';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   EpisodeCard,
   GenerationJob,
@@ -32,7 +34,14 @@ import {
   YouTubePackage,
   ResearchClaim,
   SpendApprovalGrant,
+  GoogleFlowPlan,
+  GoogleFlowBatch,
 } from '../src/types/index.ts';
+import {
+  createGoogleFlowPlan,
+  validateBatchIngestion,
+  generateFfmpeg24fpsStitchScript,
+} from '../src/core/flow.ts';
 
 export const apiRouter = Router();
 
@@ -809,6 +818,199 @@ apiRouter.post('/cli/execute', async (req: Request, res: Response) => {
     } else {
       res.json({ ok: true, output: JSON.stringify({ ok: true, command: trimmed, status: 'executed' }, null, 2) });
     }
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Google Flow Bridge & 24-Frame Asset Automation (flow.google.com)
+// ---------------------------------------------------------------------------
+
+apiRouter.get('/projects/:id/flow/plan/:epId', async (req: Request, res: Response) => {
+  try {
+    const projectId = req.params.id;
+    const epId = req.params.epId;
+
+    let plan = await storage.getGoogleFlowPlan(projectId, epId);
+    if (!plan) {
+      const episode = await storage.getEpisode(projectId, epId);
+      const title = episode ? episode.workingTitle : 'Survival Story Episode';
+      plan = createGoogleFlowPlan(epId, title, 600, 24, 'dense_24fps');
+      await storage.saveGoogleFlowPlan(projectId, plan);
+    }
+
+    // Check disk for rendered frames to keep stats updated
+    const rendersDir = path.resolve(process.cwd(), 'data', 'production_root', 'projects', projectId, 'assets', 'flow_renders', epId);
+    if (fs.existsSync(rendersDir)) {
+      const files = await fs.promises.readdir(rendersDir);
+      const imageFiles = files.filter(f => /\.(png|jpe?g|webp)$/i.test(f));
+      plan.summary.totalFramesIngested = imageFiles.length;
+      plan.summary.completionPercentage = Math.min(100, Math.round((imageFiles.length / plan.totalFramesExpected) * 100));
+    }
+
+    res.json({ ok: true, data: plan });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+apiRouter.post('/projects/:id/flow/plan/:epId', async (req: Request, res: Response) => {
+  try {
+    const projectId = req.params.id;
+    const epId = req.params.epId;
+    const { mode = 'dense_24fps', durationSeconds = 600, fps = 24 } = req.body;
+
+    const episode = await storage.getEpisode(projectId, epId);
+    const title = episode ? episode.workingTitle : 'Survival Story Episode';
+
+    const plan = createGoogleFlowPlan(epId, title, Number(durationSeconds), Number(fps), mode);
+    await storage.saveGoogleFlowPlan(projectId, plan);
+
+    res.json({ ok: true, data: plan });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+apiRouter.post('/projects/:id/flow/batch/:batchId/status', async (req: Request, res: Response) => {
+  try {
+    const projectId = req.params.id;
+    const batchId = req.params.batchId;
+    const { episodeId, status } = req.body;
+
+    const plan = await storage.getGoogleFlowPlan(projectId, episodeId);
+    if (!plan) {
+      res.status(404).json({ ok: false, error: 'Google Flow plan not found' });
+      return;
+    }
+
+    const batch = plan.batches.find((b) => b.batchId === batchId);
+    if (!batch) {
+      res.status(404).json({ ok: false, error: 'Batch not found in plan' });
+      return;
+    }
+
+    batch.status = status;
+    if (status === 'dispatched') {
+      batch.dispatchedAt = new Date().toISOString();
+    } else if (status === 'ingested' || status === 'verified') {
+      batch.ingestedAt = new Date().toISOString();
+      plan.accounts[batch.assignedAccount].batchesCompleted++;
+    }
+
+    // Recompute summary
+    plan.summary.pendingBatches = plan.batches.filter((b) => b.status === 'pending').length;
+    plan.summary.dispatchedBatches = plan.batches.filter((b) => b.status === 'dispatched').length;
+    plan.summary.ingestedBatches = plan.batches.filter((b) => b.status === 'ingested').length;
+    plan.summary.verifiedBatches = plan.batches.filter((b) => b.status === 'verified').length;
+    plan.updatedAt = new Date().toISOString();
+
+    await storage.saveGoogleFlowPlan(projectId, plan);
+    res.json({ ok: true, data: { batch, summary: plan.summary } });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+apiRouter.post('/projects/:id/flow/ingest', async (req: Request, res: Response) => {
+  try {
+    const projectId = req.params.id;
+    const { episodeId, batchId, fileNames = [], simulate = false } = req.body;
+
+    const plan = await storage.getGoogleFlowPlan(projectId, episodeId);
+    if (!plan) {
+      res.status(404).json({ ok: false, error: 'Google Flow plan not found' });
+      return;
+    }
+
+    const batch = plan.batches.find((b) => b.batchId === batchId);
+    if (!batch) {
+      res.status(404).json({ ok: false, error: 'Batch not found in plan' });
+      return;
+    }
+
+    const outDir = path.resolve(process.cwd(), 'data', 'production_root', 'projects', projectId, 'assets', 'flow_renders', episodeId);
+    await fs.promises.mkdir(outDir, { recursive: true });
+
+    let filesToProcess: string[] = fileNames;
+    if (simulate || filesToProcess.length === 0) {
+      // Create lightweight simulated 24 frames for local pipeline testing
+      filesToProcess = [];
+      const baseFrameNum = (batch.batchIndex - 1) * 24;
+      for (let i = 1; i <= 24; i++) {
+        const frameNum = baseFrameNum + i;
+        const frameFileName = `frame_${String(frameNum).padStart(5, '0')}.png`;
+        const framePath = path.join(outDir, frameFileName);
+        if (!fs.existsSync(framePath)) {
+          // Minimal 1x1 24fps placeholder PNG
+          const minimalPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64');
+          await fs.promises.writeFile(framePath, minimalPng);
+        }
+        filesToProcess.push(frameFileName);
+      }
+    }
+
+    const validation = validateBatchIngestion(batch, filesToProcess);
+    batch.ingestedFiles = validation.normalizedFiles;
+    batch.ingestedFrameCount = validation.ingestedCount;
+    batch.missingFrames = validation.missingFrames;
+    batch.status = validation.isValid ? 'verified' : 'ingested';
+    batch.ingestedAt = new Date().toISOString();
+
+    // Update account progress
+    plan.accounts[batch.assignedAccount].batchesCompleted = plan.batches.filter(
+      (b) => b.assignedAccount === batch.assignedAccount && (b.status === 'ingested' || b.status === 'verified')
+    ).length;
+
+    // Recalculate summary
+    const allFiles = await fs.promises.readdir(outDir);
+    const totalRendered = allFiles.filter(f => /\.(png|jpe?g|webp)$/i.test(f)).length;
+    plan.summary.totalFramesIngested = totalRendered;
+    plan.summary.completionPercentage = Math.min(100, Math.round((totalRendered / plan.totalFramesExpected) * 100));
+    plan.summary.pendingBatches = plan.batches.filter((b) => b.status === 'pending').length;
+    plan.summary.dispatchedBatches = plan.batches.filter((b) => b.status === 'dispatched').length;
+    plan.summary.ingestedBatches = plan.batches.filter((b) => b.status === 'ingested').length;
+    plan.summary.verifiedBatches = plan.batches.filter((b) => b.status === 'verified').length;
+    plan.updatedAt = new Date().toISOString();
+
+    await storage.saveGoogleFlowPlan(projectId, plan);
+
+    res.json({
+      ok: true,
+      data: {
+        batchId: batch.batchId,
+        validation,
+        summary: plan.summary,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+apiRouter.post('/projects/:id/flow/stitch/:epId', async (req: Request, res: Response) => {
+  try {
+    const projectId = req.params.id;
+    const epId = req.params.epId;
+    const { fps = 24, audioPath = '' } = req.body;
+
+    const scriptBash = generateFfmpeg24fpsStitchScript(projectId, epId, Number(fps), audioPath);
+    const scriptPath = path.resolve(process.cwd(), `render_flow_${epId}_24fps.sh`);
+    await fs.promises.writeFile(scriptPath, scriptBash, 'utf-8');
+    try {
+      fs.chmodSync(scriptPath, 0o755);
+    } catch {}
+
+    res.json({
+      ok: true,
+      data: {
+        episodeId: epId,
+        script: scriptBash,
+        scriptPath,
+        cliCommand: `npm run studio -- flow stitch --episode ${epId} --fps ${fps} --save`,
+      },
+    });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });
   }

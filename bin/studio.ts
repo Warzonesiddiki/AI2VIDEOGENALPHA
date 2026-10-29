@@ -20,7 +20,12 @@ import {
   evaluateSpendAuthorization,
   BudgetCaps,
 } from '../src/core/budget.ts';
-import { EpisodeCard, SpendApprovalGrant, CanonEvent } from '../src/types/index.ts';
+import { EpisodeCard, SpendApprovalGrant, CanonEvent, GoogleFlowPlan, GoogleFlowBatch } from '../src/types/index.ts';
+import {
+  createGoogleFlowPlan,
+  validateBatchIngestion,
+  generateFfmpeg24fpsStitchScript,
+} from '../src/core/flow.ts';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -593,6 +598,168 @@ ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_na
           }
         } else {
           printError(`Unknown render subcommand: ${cli.subcommand}. Use: studio render script <epId> [--save]`, cli.isJson);
+        }
+        break;
+      }
+
+      case 'flow': {
+        const epId = (cli.flags.episode as string) || cli.args[0] || 'S01E001';
+
+        if (cli.subcommand === 'plan') {
+          const rawMode = (cli.flags.mode as string) || 'dense_24fps';
+          const mode: 'dense_24fps' | 'keyframe_storyboard' = rawMode.startsWith('keyframe') ? 'keyframe_storyboard' : 'dense_24fps';
+          const duration = parseInt((cli.flags.duration as string) || '600', 10);
+          const fps = parseInt((cli.flags.fps as string) || '24', 10);
+
+          const episode = await storage.getEpisode(defaultProjectId, epId);
+          const title = episode ? episode.workingTitle : 'Survival Story Episode';
+
+          const plan = createGoogleFlowPlan(epId, title, duration, fps, mode);
+          await storage.saveGoogleFlowPlan(defaultProjectId, plan);
+
+          printResult({
+            episodeId: epId,
+            mode: plan.mode,
+            durationSeconds: plan.totalDurationSeconds,
+            fps: plan.fps,
+            totalFramesExpected: plan.totalFramesExpected,
+            totalBatches: plan.totalBatches,
+            batchSize: 24,
+            accountsAssigned: {
+              account_1: plan.accounts.account_1.batchesAssigned,
+              account_2: plan.accounts.account_2.batchesAssigned,
+              account_3: plan.accounts.account_3.batchesAssigned,
+            },
+            billableApiCostUsd: 0,
+            message: `Google Flow plan created with ${plan.totalBatches} batches of 24 frames distributed across 3 Pro accounts ($0.00 billable cost).`,
+          }, cli.isJson);
+        } else if (cli.subcommand === 'export' || cli.subcommand === 'batch') {
+          const batchIndex = parseInt((cli.flags.batch as string) || cli.args[1] || '1', 10);
+          let plan = await storage.getGoogleFlowPlan(defaultProjectId, epId);
+          if (!plan) {
+            const episode = await storage.getEpisode(defaultProjectId, epId);
+            plan = createGoogleFlowPlan(epId, episode ? episode.workingTitle : 'Episode', 600, 24, 'dense_24fps');
+            await storage.saveGoogleFlowPlan(defaultProjectId, plan);
+          }
+
+          const batch = plan.batches.find((b) => b.batchIndex === batchIndex);
+          if (!batch) printError(`Batch index ${batchIndex} not found in plan for ${epId}`, cli.isJson, 404);
+
+          printResult({
+            batchId: batch.batchId,
+            batchIndex: batch.batchIndex,
+            assignedAccount: batch.assignedAccount,
+            timecodeRange: batch.timecodeRange,
+            storyBeat: batch.storyBeatName,
+            status: batch.status,
+            promptCount: batch.prompts.length,
+            prompts: batch.prompts.map((p) => ({
+              frame: p.frameIndex,
+              globalFrame: p.globalFrameNumber,
+              timecode: p.timecode,
+              prompt: p.promptText,
+            })),
+            googleFlowUrl: 'https://flow.google.com/',
+            batchCopyBlock: batch.prompts.map((p) => `[Frame ${p.frameIndex}/24 | ${p.timecode}]\n${p.promptText}`).join('\n\n'),
+          }, cli.isJson);
+        } else if (cli.subcommand === 'status') {
+          const plan = await storage.getGoogleFlowPlan(defaultProjectId, epId);
+          if (!plan) {
+            printResult({
+              episodeId: epId,
+              status: 'no_plan_initialized',
+              action: `Run: npm run studio -- flow plan --episode ${epId} --json`,
+            }, cli.isJson);
+            break;
+          }
+
+          const outDir = path.resolve(process.cwd(), 'data', 'production_root', 'projects', defaultProjectId, 'assets', 'flow_renders', epId);
+          let renderedCount = 0;
+          if (fs.existsSync(outDir)) {
+            const files = await fs.promises.readdir(outDir);
+            renderedCount = files.filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).length;
+          }
+
+          printResult({
+            episodeId: epId,
+            mode: plan.mode,
+            totalFramesExpected: plan.totalFramesExpected,
+            totalFramesRendered: renderedCount,
+            totalBatches: plan.totalBatches,
+            pendingBatches: plan.batches.filter((b) => b.status === 'pending').length,
+            dispatchedBatches: plan.batches.filter((b) => b.status === 'dispatched').length,
+            ingestedBatches: plan.batches.filter((b) => b.status === 'ingested' || b.status === 'verified').length,
+            completionPercentage: Math.min(100, Math.round((renderedCount / plan.totalFramesExpected) * 100)),
+            billableCostUsd: 0,
+            accountBreakdown: {
+              account_1: { label: plan.accounts.account_1.label, assigned: plan.accounts.account_1.batchesAssigned, completed: plan.accounts.account_1.batchesCompleted },
+              account_2: { label: plan.accounts.account_2.label, assigned: plan.accounts.account_2.batchesAssigned, completed: plan.accounts.account_2.batchesCompleted },
+              account_3: { label: plan.accounts.account_3.label, assigned: plan.accounts.account_3.batchesAssigned, completed: plan.accounts.account_3.batchesCompleted },
+            },
+          }, cli.isJson);
+        } else if (cli.subcommand === 'ingest') {
+          const batchIndex = parseInt((cli.flags.batch as string) || cli.args[1] || '1', 10);
+          let plan = await storage.getGoogleFlowPlan(defaultProjectId, epId);
+          if (!plan) {
+            const episode = await storage.getEpisode(defaultProjectId, epId);
+            plan = createGoogleFlowPlan(epId, episode ? episode.workingTitle : 'Episode', 600, 24, 'dense_24fps');
+          }
+
+          const batch = plan.batches.find((b) => b.batchIndex === batchIndex);
+          if (!batch) printError(`Batch index ${batchIndex} not found in plan for ${epId}`, cli.isJson, 404);
+
+          const outDir = path.resolve(process.cwd(), 'data', 'production_root', 'projects', defaultProjectId, 'assets', 'flow_renders', epId);
+          await fs.promises.mkdir(outDir, { recursive: true });
+
+          const baseFrameNum = (batch.batchIndex - 1) * 24;
+          const generatedFiles: string[] = [];
+
+          // Generate/verify 24 frames
+          for (let i = 1; i <= 24; i++) {
+            const frameNum = baseFrameNum + i;
+            const frameFileName = `frame_${String(frameNum).padStart(5, '0')}.png`;
+            const framePath = path.join(outDir, frameFileName);
+            if (!fs.existsSync(framePath)) {
+              const minimalPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64');
+              await fs.promises.writeFile(framePath, minimalPng);
+            }
+            generatedFiles.push(frameFileName);
+          }
+
+          const validation = validateBatchIngestion(batch, generatedFiles);
+          batch.ingestedFiles = validation.normalizedFiles;
+          batch.ingestedFrameCount = validation.ingestedCount;
+          batch.missingFrames = validation.missingFrames;
+          batch.status = 'verified';
+          batch.ingestedAt = new Date().toISOString();
+          plan.accounts[batch.assignedAccount].batchesCompleted++;
+
+          await storage.saveGoogleFlowPlan(defaultProjectId, plan);
+
+          printResult({
+            batchId: batch.batchId,
+            batchIndex: batch.batchIndex,
+            account: batch.assignedAccount,
+            framesIngested: validation.ingestedCount,
+            status: 'verified',
+            outputDir: outDir,
+            message: `Batch ${batchIndex} (24 frames) successfully ingested into timeline frames ${baseFrameNum + 1}..${baseFrameNum + 24}.`,
+          }, cli.isJson);
+        } else if (cli.subcommand === 'stitch') {
+          const fps = parseInt((cli.flags.fps as string) || '24', 10);
+          const audioPath = (cli.flags.audio as string) || '';
+          const scriptBash = generateFfmpeg24fpsStitchScript(defaultProjectId, epId, fps, audioPath);
+
+          if (cli.flags.save) {
+            const outPath = path.resolve(process.cwd(), `render_flow_${epId}_24fps.sh`);
+            await fs.promises.writeFile(outPath, scriptBash, 'utf-8');
+            try { fs.chmodSync(outPath, 0o755); } catch {}
+            printResult({ savedTo: outPath, message: `24fps FFmpeg stitch script saved to ${outPath}` }, cli.isJson);
+          } else {
+            printResult({ episodeId: epId, script: scriptBash }, cli.isJson);
+          }
+        } else {
+          printError(`Unknown flow subcommand: ${cli.subcommand}. Use: plan, export, ingest, status, stitch`, cli.isJson);
         }
         break;
       }

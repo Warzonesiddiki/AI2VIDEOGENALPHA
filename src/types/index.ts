@@ -518,3 +518,85 @@ export interface SystemDiagnostics {
   };
   remediationSteps: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Google Flow Bridge & 24-Frame Asset Automation (flow.google.com)
+// ---------------------------------------------------------------------------
+
+export type FlowAccountSlot = 'account_1' | 'account_2' | 'account_3';
+
+export interface GoogleFlowAccount {
+  slot: FlowAccountSlot;
+  label: string;
+  emailOrIdentifier: string;
+  isPro: true;
+  dailyBatchQuota: number; // e.g. 200 batches
+  batchesAssigned: number;
+  batchesCompleted: number;
+  status: 'active' | 'quota_exhausted' | 'idle';
+  lastActivityAt?: string;
+}
+
+export type GoogleFlowBatchStatus =
+  | 'pending'
+  | 'dispatched'
+  | 'downloaded'
+  | 'ingested'
+  | 'verified';
+
+export interface GoogleFlowBatchPrompt {
+  frameIndex: number; // 1 to 24 within batch
+  globalFrameNumber: number; // 1 to 14,400 across episode
+  timecode: string; // e.g. "00:04.125"
+  shotAnchor: string;
+  promptText: string;
+  negativePrompt: string;
+  styleIngredients: string[];
+}
+
+export interface GoogleFlowBatch {
+  batchId: string; // e.g. "GF_S01E001_B001"
+  batchIndex: number; // 1 to 600
+  episodeId: string;
+  assignedAccount: FlowAccountSlot;
+  timecodeRange: {
+    start: string;
+    end: string;
+  };
+  storyBeatName: string;
+  dramaticPacing: string;
+  prompts: GoogleFlowBatchPrompt[];
+  status: GoogleFlowBatchStatus;
+  framesExpected: 24;
+  ingestedFrameCount: number;
+  ingestedFiles: string[];
+  missingFrames: number[];
+  dispatchedAt?: string;
+  ingestedAt?: string;
+}
+
+export interface GoogleFlowPlan {
+  episodeId: string;
+  episodeTitle: string;
+  mode: 'dense_24fps' | 'keyframe_storyboard';
+  totalDurationSeconds: number; // 600 seconds (10 minutes)
+  fps: number; // 24 fps
+  totalFramesExpected: number; // 14,400 or 600
+  totalBatches: number; // 600 or 25
+  batchSize: 24;
+  accounts: Record<FlowAccountSlot, GoogleFlowAccount>;
+  batches: GoogleFlowBatch[];
+  summary: {
+    totalFramesIngested: number;
+    completionPercentage: number;
+    pendingBatches: number;
+    dispatchedBatches: number;
+    ingestedBatches: number;
+    verifiedBatches: number;
+    billableApiSpendUsd: 0; // Explicitly $0.00 via Google Flow Pro
+  };
+  outputDirectory: string;
+  stitchScriptPath?: string;
+  createdAt: string;
+  updatedAt: string;
+}

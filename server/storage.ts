@@ -18,6 +18,7 @@ import {
   SystemDiagnostics,
   SpendApprovalGrant,
   ArcRoadmapItem,
+  GoogleFlowPlan,
 } from '../src/types/index.ts';
 import { ALL_100_ARCS_ROADMAP, DEFAULT_SERIES_BIBLE, PILOT_EPISODE_CARD } from './seedData.ts';
 
@@ -638,6 +639,27 @@ This is an original work of survival fiction. All infections, emergency signals,
       },
       remediationSteps,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Google Flow Plans (flow.google.com 24-Frame Asset Automation)
+  // -------------------------------------------------------------------------
+
+  public async getGoogleFlowPlan(projectId: string, episodeId: string): Promise<GoogleFlowPlan | null> {
+    await this.init();
+    const filePath = path.join(this.baseDir, 'projects', projectId, 'flow_plans', `${episodeId}.json`);
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    return this.readJson<GoogleFlowPlan | null>(filePath, null);
+  }
+
+  public async saveGoogleFlowPlan(projectId: string, plan: GoogleFlowPlan): Promise<void> {
+    await this.init();
+    const dir = path.join(this.baseDir, 'projects', projectId, 'flow_plans');
+    await fs.promises.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, `${plan.episodeId}.json`);
+    await this.atomicWriteJson(filePath, plan);
   }
 
   // -------------------------------------------------------------------------
