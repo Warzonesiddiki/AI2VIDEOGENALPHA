@@ -13,6 +13,7 @@ import { EpisodeBoardView } from './components/EpisodeBoardView.tsx';
 import { ScriptEditorView } from './components/ScriptEditorView.tsx';
 import { ResearchRoomView } from './components/ResearchRoomView.tsx';
 import { ScenePlannerView } from './components/ScenePlannerView.tsx';
+import { GoogleFlowView } from './components/GoogleFlowView.tsx';
 import { AutoproducerView } from './components/AutoproducerView.tsx';
 import { JobsQueueView } from './components/JobsQueueView.tsx';
 import { YouTubeView } from './components/YouTubeView.tsx';
@@ -190,6 +191,13 @@ export default function App() {
 
           {activeTab === 'scene_planner' && (
             <ScenePlannerView episodeId={selectedEpisodeId} />
+          )}
+
+          {activeTab === 'google_flow' && (
+            <GoogleFlowView
+              projectId={projectId}
+              episodeId={selectedEpisodeId}
+            />
           )}
 
           {activeTab === 'autoproducer' && (

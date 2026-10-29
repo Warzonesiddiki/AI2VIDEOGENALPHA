@@ -293,6 +293,10 @@ export class StorageEngine {
     return event;
   }
 
+  public async saveCanonEvent(projectId: string, event: CanonEvent): Promise<CanonEvent> {
+    return this.addCanonEvent(projectId, event);
+  }
+
   public async listResearchClaims(projectId: string): Promise<ResearchClaim[]> {
     await this.init();
     const filePath = path.join(this.baseDir, 'projects', projectId, 'research_claims.json');

@@ -14,6 +14,7 @@ import {
   Settings,
   AlertTriangle,
   ExternalLink,
+  Layers,
 } from 'lucide-react';
 
 export type ActiveTab =
@@ -24,6 +25,7 @@ export type ActiveTab =
   | 'script_editor'
   | 'research_room'
   | 'scene_planner'
+  | 'google_flow'
   | 'autoproducer'
   | 'jobs_queue'
   | 'youtube'
@@ -61,6 +63,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       title: 'MEDIA & PRODUCTION',
       items: [
         { id: 'scene_planner' as ActiveTab, label: 'Storyboard & Audio', icon: LayoutGrid },
+        { id: 'google_flow' as ActiveTab, label: 'Google Flow (24fps)', icon: Layers },
         { id: 'autoproducer' as ActiveTab, label: 'Autoproducer', icon: Bot },
         {
           id: 'jobs_queue' as ActiveTab,

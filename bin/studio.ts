@@ -319,6 +319,7 @@ FLAGS:
                 versionNumber: 1,
                 author: (cli.flags.author as string) || 'OpenCode Agent',
                 fullNarrationText: '',
+                wordCount: 0,
                 spokenWordCount: 0,
                 estimatedDurationSeconds: 0,
                 targetWpm: 145,
@@ -363,8 +364,9 @@ FLAGS:
             versionNumber: newVersionNumber,
             author,
             fullNarrationText: narrationText,
+            wordCount,
             spokenWordCount: wordCount,
-            estimatedDurationSeconds: pacing.targetSeconds,
+            estimatedDurationSeconds: pacing.estimatedDurationSeconds,
             targetWpm: 145,
             beats: [],
             pronunciationNotes: [],
@@ -379,9 +381,9 @@ FLAGS:
             episodeId: epId,
             versionNumber: newVersionNumber,
             wordCount,
-            durationFormatted: pacing.formattedDuration,
-            pacingStatus: pacing.pacingComplianceStatus,
-            canonViolations: canonValidation.violations,
+            durationFormatted: pacing.estimatedDurationFormatted,
+            pacingStatus: pacing.pacingNote,
+            canonViolations: canonValidation.infractions,
             isCanonCompliant: !canonValidation.violatesHardRules,
           }, cli.isJson);
         } else if (cli.subcommand === 'add-beat') {
@@ -395,6 +397,9 @@ FLAGS:
           const episode = await storage.getEpisode(defaultProjectId, epId);
           if (!episode) printError(`Episode not found: ${epId}`, cli.isJson, 404);
 
+          if (!episode.beats) {
+            episode.beats = [];
+          }
           const beatNumber = episode.beats.length + 1;
           episode.beats.push({
             beatNumber,
@@ -496,6 +501,7 @@ FLAGS:
             whatCharactersLearned: {
               'Rhea Mistry': summary,
             },
+            resourceDeltas: cli.flags.delta ? [(cli.flags.delta as string)] : [],
             injuriesOrStatusChanges: cli.flags.injury ? [(cli.flags.injury as string)] : [],
             unresolvedClues: cli.flags.clue ? [(cli.flags.clue as string)] : [],
             promisesMade: [],

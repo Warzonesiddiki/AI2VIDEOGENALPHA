@@ -111,16 +111,16 @@ export function checkEpisodeDistinctness(
   proposed: {
     workingTitle: string;
     logline: string;
-    aPlot: string;
-    consequence: string;
+    aPlot?: string;
+    consequence?: string;
     visualMotifs?: string[];
   },
   priorEpisodes: Array<{
     id: string;
     workingTitle: string;
     logline: string;
-    aPlot: string;
-    consequence: string;
+    aPlot?: string;
+    consequence?: string;
     visualMotifs?: string[];
   }>
 ): SimilarityCheckResult {
@@ -128,10 +128,10 @@ export function checkEpisodeDistinctness(
   let conflictId: string | undefined;
   const warnings: string[] = [];
 
-  const proposedCombined = `${proposed.workingTitle} ${proposed.logline} ${proposed.aPlot} ${proposed.consequence}`;
+  const proposedCombined = `${proposed.workingTitle} ${proposed.logline} ${proposed.aPlot || ''} ${proposed.consequence || ''}`;
 
   for (const prior of priorEpisodes) {
-    const priorCombined = `${prior.workingTitle} ${prior.logline} ${prior.aPlot} ${prior.consequence}`;
+    const priorCombined = `${prior.workingTitle} ${prior.logline} ${prior.aPlot || ''} ${prior.consequence || ''}`;
     const sim = calculateTextSimilarity(proposedCombined, priorCombined);
 
     if (sim > maxSimilarity) {

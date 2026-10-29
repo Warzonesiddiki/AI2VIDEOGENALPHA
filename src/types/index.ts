@@ -235,8 +235,10 @@ export interface BeatAnchor {
 
 export interface ScriptVersion {
   versionNumber: number;
+  author?: string;
   fullNarrationText: string;
   wordCount: number;
+  spokenWordCount?: number;
   estimatedDurationSeconds: number;
   targetWpm: number;
   actualVoiceDurationSeconds?: number;
@@ -248,40 +250,61 @@ export interface ScriptVersion {
   createdAt: string;
 }
 
+export interface EpisodeOutlineBeat {
+  beatNumber: number;
+  name: string;
+  targetSeconds?: number;
+  visualDescription?: string;
+  spokenDialogueSnippet?: string;
+  soundDesignCues?: string[];
+  continuityClues?: string[];
+}
+
 export interface EpisodeCard {
   id: string; // e.g. "S01E001"
   dbId: string;
   projectId: string;
   seriesId: string;
-  season: number;
-  episodeNumber: number;
+  season?: number;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  episodeNumberInArc?: number;
+  episodeNumberInSeries?: number;
   arcNumber: number;
   workingTitle: string;
   logline: string;
-  centralDramaticQuestion: string;
-  timeline: {
+  premiseHook?: string;
+  targetAudiencePersona?: string;
+  centralDramaticQuestion?: string;
+  timeline?: {
     storyDate: string;
     elapsedTime: string;
     confidence: 'confirmed' | 'approximate' | 'unknown';
   };
-  settingIds: string[];
-  povCharacterIds: string[];
-  aPlot: string;
-  bPlot: string;
-  physicalObjective: string;
-  humanConflict: string;
-  characterTurn: string;
-  majorDecision: string;
-  consequence: string;
-  clueOrPayoff: string;
-  endingBeat: string;
+  timelineAnchor?: string;
+  charactersPresent?: string[];
+  physicalLocations?: string[];
+  settingIds?: string[];
+  povCharacterIds?: string[];
+  aPlot?: string;
+  bPlot?: string;
+  physicalObjective?: string;
+  humanConflict?: string;
+  characterTurn?: string;
+  majorDecision?: string;
+  consequence?: string;
+  clueOrPayoff?: string;
+  endingBeat?: string;
+  beats?: EpisodeOutlineBeat[];
   status: EpisodeStatus;
   scriptVersions: ScriptVersion[];
   activeScriptVersionIndex: number;
-  visualMotifs: string[];
-  factualClaimIds: string[];
-  fictionalRuleIds: string[];
-  staleDownstreamAssets: boolean; // Flagged when script changes after storyboard
+  storyboardPromptVersions?: any[];
+  activeStoryboardVersionIndex?: number;
+  visualMotifs?: string[];
+  factualClaimIds?: string[];
+  fictionalRuleIds?: string[];
+  staleDownstreamAssets?: boolean; // Flagged when script changes after storyboard
   provenanceSourceEpisodeId?: string; // If duplicated
   createdAt: string;
   updatedAt: string;
