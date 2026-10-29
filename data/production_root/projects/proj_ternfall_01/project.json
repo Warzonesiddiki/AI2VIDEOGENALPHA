@@ -1,0 +1,11 @@
+{
+  "id": "proj_ternfall_01",
+  "name": "The Quiet Hours: Ternfall",
+  "slug": "the-quiet-hours-ternfall",
+  "description": "Original illustrated survival thriller. Fictional coastal delta city, municipal water engineer Rhea Mistry, and an 8-beat mechanical signal mystery.",
+  "productionRoot": "/app/applet/data/production_root/projects/proj_ternfall_01",
+  "createdAt": "2026-10-29T00:00:00.000Z",
+  "updatedAt": "2026-10-29T00:00:00.000Z",
+  "isArchived": false,
+  "activeSeriesId": "series_ternfall_01"
+}

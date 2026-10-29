@@ -1,0 +1,52 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "project": {
+    "name": "Ternfall Studio",
+    "description": "2D Survival Story Video Production Studio"
+  },
+  "permissions": {
+    "files": {
+      "allowRead": [
+        "./src/**/*",
+        "./server/**/*",
+        "./data/production_root/projects/**/*",
+        "./docs/**/*",
+        "./AGENTS.md"
+      ],
+      "denyRead": [
+        "**/.env*",
+        "**/secrets/**",
+        "**/*token*",
+        "**/*credentials*"
+      ],
+      "allowWrite": [
+        "./data/production_root/projects/**"
+      ],
+      "denyWrite": [
+        "../*",
+        "/etc/*",
+        "/usr/*",
+        "**/.env*"
+      ]
+    },
+    "commands": {
+      "allow": [
+        "npm run studio -- *"
+      ],
+      "deny": [
+        "*publish*",
+        "*delete*",
+        "*sudo*",
+        "*rm -rf*",
+        "*curl*",
+        "*wget*"
+      ]
+    },
+    "publish": {
+      "denyAll": true
+    },
+    "budget": {
+      "allowAutonomousIncrease": false
+    }
+  }
+}

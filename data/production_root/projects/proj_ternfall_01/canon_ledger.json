@@ -1,0 +1,32 @@
+[
+  {
+    "id": "canon_001",
+    "episodeId": "S01E001",
+    "storyDate": "Day 01, 03:45 AM",
+    "physicalLocation": "South Gate Water Control Works, Drainage Basin 3",
+    "charactersPresent": [
+      "Rhea Mistry",
+      "Mara Ilyan"
+    ],
+    "whatCharactersLearned": {
+      "rhea-mistry": "Discovered that the 8-beat pressure oscillation is mechanical and reproducible; digital flood panel gave false \"open\" status.",
+      "mara-ilyan": "Witnessed the infected moving towards the vibration rhythm rather than human voices."
+    },
+    "resourceDeltas": [
+      "Sealed South Gate manual sluice",
+      "Sacrificed clean lower service corridor access to extract trapped shift workers"
+    ],
+    "injuriesOrStatusChanges": [
+      "Shift workers safely evacuated to upper dry mezzanine"
+    ],
+    "unresolvedClues": [
+      "A second 8-beat pulse began sounding from the far north canal terminal."
+    ],
+    "promisesMade": [
+      "Rhea promised to check Kabir’s community radio frequency at dawn."
+    ],
+    "consequencesSummary": "South Gate remains an isolated safe pocket, but direct maintenance records in lower corridor are submerged.",
+    "isRetcon": false,
+    "createdAt": "2026-10-29T00:00:00.000Z"
+  }
+]

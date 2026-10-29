@@ -1,0 +1,6 @@
+{
+  "name": "Ternfall Studio",
+  "description": "Local-first production studio for original animated survival-story videos for YouTube, featuring story bible, canon continuity, scene planning, render pipeline, and YouTube operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

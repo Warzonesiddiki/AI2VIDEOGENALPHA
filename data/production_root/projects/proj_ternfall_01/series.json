@@ -1,0 +1,236 @@
+{
+  "id": "series_ternfall_01",
+  "projectId": "proj_ternfall_01",
+  "seriesTitle": "The Quiet Hours: Ternfall",
+  "logline": "A municipal water engineer maps a coastal delta city learning to move in silence, then has to choose whether the people she saves will depend on one voice—or on each other.",
+  "targetRuntimeMinutes": 15,
+  "targetWpm": 145,
+  "intendedAudience": "Adult & Young Adult Fiction (Original Serialized Survival Drama)",
+  "primaryLanguage": "English",
+  "locale": "en-US",
+  "visualBible": {
+    "medium": "Original hand-inked 2D editorial illustration with layered paper grain and restrained parallax",
+    "palette": [
+      "#0D9488 (Estuary Teal)",
+      "#334155 (Slate Gray)",
+      "#F8FAFC (Faded Cream Paper)",
+      "#B91C1C (Rust-Red)",
+      "#F59E0B (Sodium-Amber Light)",
+      "#F43F5E (Signal-Coral Accent)"
+    ],
+    "silhouetteRules": "Characters have distinct human proportions and functional clothing. Rhea’s recognizable silhouette is a cropped slate-teal rain jacket with signal-coral cuff tabs, rolled map case, and brass pressure gauge (no yellow hat or borrowed mascot).",
+    "lightingRules": "Natural ambient light, salt mist, tide marks on damp masonry, amber streetlights reflecting in canal water.",
+    "bannedStyles": [
+      "No yellow beanie mascot or competitor character copying",
+      "No hyper-saturated neon cyberpunk glow",
+      "No imitation of living manga/manhwa artists or proprietary studio styles",
+      "No gratuitous gore-first thumbnail shock loops"
+    ]
+  },
+  "rules": [
+    {
+      "id": "rule_infection_vector",
+      "category": "infection",
+      "title": "Infection Vector: Contact Only",
+      "fictionalRule": "Transmission occurs strictly through a bite or infected saliva entering broken skin. It is NOT airborne, and it is NOT caused by drinking municipal water.",
+      "isFictional": true,
+      "narrativeImplications": "Characters gradually discover this through careful observation and medical caution over multiple seasons, debunking wild rumors.",
+      "prohibitedMisconceptions": "Do not portray city water as poisonous or infectious. Do not include airborne spore masks as an infection defense."
+    },
+    {
+      "id": "rule_still_behavior",
+      "category": "infection",
+      "title": "The Still: Residual Motor Habits",
+      "fictionalRule": "The infected (\"The Still\") retain fragments of motor habit (turning toward familiar vibrations, reaching for door plates, repeating routine footsteps). They possess NO speech, telepathy, or deliberate strategy.",
+      "isFictional": true,
+      "narrativeImplications": "Their behavior is physically plausible and consistent. Danger comes from proximity and consequence, not sudden arbitrary teleportation.",
+      "prohibitedMisconceptions": "Do not portray the infected talking, planning coordinated traps, or having magical instincts."
+    },
+    {
+      "id": "rule_eight_beat_pulse",
+      "category": "signal_pulse",
+      "title": "The Mechanical Rhythm & Brittle Sirens",
+      "fictionalRule": "The infected respond to repeating low-frequency mechanical rhythms produced by the city’s brittle flood pump network (an 8-beat pulse). The pulse does NOT create or control the infection—it merely redirects movement unreliably.",
+      "isFictional": true,
+      "narrativeImplications": "Using the signal is an ethical dilemma: diverting the Still from one district often pushes them toward another shelter.",
+      "prohibitedMisconceptions": "The pulse is not a superpower or permanent zombie hack."
+    },
+    {
+      "id": "rule_no_miracle_cure",
+      "category": "society",
+      "title": "No Miracle Cure: Resilient Community",
+      "fictionalRule": "The ending is about building durable, transparent community governance and truthful maps—not a magical one-shot antidote that erases every loss.",
+      "isFictional": true,
+      "narrativeImplications": "Scientific inquiry by Dr. Amala Nwosu focuses on epidemiology, quarantine ethics, and care rather than cinematic weaponized cures.",
+      "prohibitedMisconceptions": "Never introduce secret miracle serums or instant vaccines."
+    }
+  ],
+  "characters": [
+    {
+      "id": "rhea-mistry",
+      "name": "Rhea Mistry",
+      "age": 31,
+      "role": "Municipal Water-Network Engineer & Reluctant Navigator",
+      "visualAnchor": "Cropped slate-teal rain jacket with signal-coral cuff tabs, rolled canvas map case, brass pressure gauge",
+      "psychologicalWound": "Signed an engineering memo approving an old service route closure that now obstructs survivor evacuation; struggles with sharing uncertainty.",
+      "knowledgeScope": "Basin hydraulics, decommissioned sluices, low-pressure mains, analog telemetry dials",
+      "voiceStyle": "Methodical, quiet, precise, observant; speaks with practical clarity rather than rhetoric",
+      "appearancePromptGuidance": "31-year-old South Asian woman with keen analytical eyes, hair tied back securely, practical utilitarian rain gear, weathered brass pressure gauge at belt",
+      "currentStatus": "active",
+      "lastKnownLocation": "South Gate Water Control Works"
+    },
+    {
+      "id": "kabir-mistry",
+      "name": "Kabir Mistry",
+      "age": 26,
+      "role": "Field Sound Archivist & Community Radio Volunteer",
+      "visualAnchor": "Heavy canvas rucksack with directional microphone boom, open reel audio tape loops, notebook",
+      "psychologicalWound": "Left the family home years prior after an unresolved disagreement; refuses to let forgotten places be erased.",
+      "knowledgeScope": "Acoustic geography, radio relays, oral neighborhood histories, community routes",
+      "voiceStyle": "Warm, observant, empathetic, slightly hesitant; values recording truth over command",
+      "appearancePromptGuidance": "26-year-old South Asian young man with windblown hair, vintage field recorder, notebook tucked in pocket",
+      "currentStatus": "missing",
+      "lastKnownLocation": "Inland Community Radio Relay 4"
+    },
+    {
+      "id": "mara-ilyan",
+      "name": "Mara Ilyan",
+      "age": 47,
+      "role": "Harbor Ferry Mechanic",
+      "visualAnchor": "Grease-stained heavy canvas work coat, brass pocket compass, toolbox",
+      "psychologicalWound": "Her harbor crew was left stranded during an earlier institutional storm response; deeply skeptical of centralized orders.",
+      "knowledgeScope": "Diesel marine engines, tidal currents, harbor islands, battery banks",
+      "voiceStyle": "Grounded, caustic, direct, protective of working people",
+      "appearancePromptGuidance": "47-year-old woman with silver-streaked dark hair, calloused hands, durable maritime coat",
+      "currentStatus": "active",
+      "lastKnownLocation": "South Gate Basin Canal"
+    },
+    {
+      "id": "amala-nwosu",
+      "name": "Dr. Amala Nwosu",
+      "age": 38,
+      "role": "Community Epidemiologist & Health Logistics Coordinator",
+      "visualAnchor": "Dark wool field vest, clip-on reading spectacles, clinical logbook",
+      "psychologicalWound": "Witnessed public panic caused by false early assurances; insists on communicating uncertainty honestly.",
+      "knowledgeScope": "Disease vectors, public health logistics, quarantine ethics, consent protocols",
+      "voiceStyle": "Calm, measured, scientifically rigorous, deeply humane",
+      "appearancePromptGuidance": "38-year-old Black woman with quiet authority, thoughtful expression, field clipboard",
+      "currentStatus": "active",
+      "lastKnownLocation": "District 4 Health Clinic"
+    },
+    {
+      "id": "yusef-rahal",
+      "name": "Yusef \"Yuse\" Rahal",
+      "age": 17,
+      "role": "Rooftop Courier & Radio Learner",
+      "visualAnchor": "Scuffed high-traction runners, lightweight orange windbreaker, messenger bag",
+      "psychologicalWound": "Resents adults treating him as either helpless or as a disposable runner; fiercely independent.",
+      "knowledgeScope": "Rooftop bridges, fire escapes, line-of-sight signal paths, courier codes",
+      "voiceStyle": "Fast, sharp, alert, dry humor under pressure",
+      "appearancePromptGuidance": "17-year-old agile young man, observant dark eyes, bright runner sneakers, lightweight messenger strap",
+      "currentStatus": "active",
+      "lastKnownLocation": "Rooftops above Canal Basin 3"
+    },
+    {
+      "id": "tomas-vale",
+      "name": "Tomas Vale",
+      "age": 53,
+      "role": "Former Municipal Emergency Operations Director",
+      "visualAnchor": "Faded municipal emergency blazer, lanyard with security fobs, master key ring",
+      "psychologicalWound": "Believes panic kills more than disasters; withheld information in the past with catastrophic results.",
+      "knowledgeScope": "Official emergency directives, siren network topology, civil defense stores",
+      "voiceStyle": "Authoritative, burdened, procedural; struggles when centralized commands fail",
+      "appearancePromptGuidance": "53-year-old man with tired graying temples, stern jaw, wrinkled official uniform",
+      "currentStatus": "active",
+      "lastKnownLocation": "Continuity Directorate Command Center"
+    },
+    {
+      "id": "sima-dey",
+      "name": "Sima Dey",
+      "age": 68,
+      "role": "Municipal Archive Librarian & Historian",
+      "visualAnchor": "Hand-knitted cardigan, heavy reading glasses on cord, canvas satchel of annotated paper flood maps",
+      "psychologicalWound": "Knows how easily paper maps were manipulated to erase working-class neighborhood rights.",
+      "knowledgeScope": "Pre-digital flood barrier maps, deed books, old drainage bylaws, forgotten city routes",
+      "voiceStyle": "Dry, witty, unrelenting in seeking documented evidence",
+      "appearancePromptGuidance": "68-year-old woman with shrewd knowing gaze, silver hair in a neat bun, holding hand-corrected paper blueprints",
+      "currentStatus": "active",
+      "lastKnownLocation": "Central Flood Archive Basement"
+    },
+    {
+      "id": "linh-cho",
+      "name": "Linh Cho",
+      "age": 42,
+      "role": "Elevated Rail Transit Dispatcher",
+      "visualAnchor": "High-visibility dispatcher vest, handheld radio transceiver, transit schedule board",
+      "psychologicalWound": "Haunted by stranded trains she could not reverse when the power grid tripped.",
+      "knowledgeScope": "Transit viaducts, track power substations, line blockages, elevated vantage points",
+      "voiceStyle": "Disciplined, steady, protective of protocol until people require improvisation",
+      "appearancePromptGuidance": "42-year-old East Asian woman with disciplined posture, reflective transit vest, walkie-talkie at shoulder",
+      "currentStatus": "active",
+      "lastKnownLocation": "Line 2 Elevated Viaduct Station"
+    }
+  ],
+  "locations": [
+    {
+      "id": "loc_south_gate",
+      "name": "South Gate Water Control Works",
+      "district": "Drainage Basin 3",
+      "environmentalDescription": "Concrete sluice structure built in 1974 with manual handwheels, low-pressure iron pipes, and an analog control mezzanine.",
+      "waterStatus": "low_pressure",
+      "infrastructureNotes": "Controls flood barriers between Basin 3 and the harbor; contains the primary 8-beat pressure gauge.",
+      "visualPalette": "Industrial concrete, peeling teal enamel, dark river water, brass dials"
+    },
+    {
+      "id": "loc_canal_commons",
+      "name": "The Canal Commons",
+      "district": "Old Delta Wards",
+      "environmentalDescription": "Network of brick townhouses, pedestrian footbridges, moored barges, and shared rainwater cisterns.",
+      "waterStatus": "flooded",
+      "infrastructureNotes": "Self-organized residential zone where survivors share water and messages.",
+      "visualPalette": "Weathered red brick, sodium lanterns, dark reflecting canals"
+    },
+    {
+      "id": "loc_harbor_islands",
+      "name": "Ternfall Harbor Islands",
+      "district": "Outer Coastal Reach",
+      "environmentalDescription": "Chain of three low-lying islands with salt marshes, decommissioned ferry slips, and a solar battery station.",
+      "waterStatus": "submerged",
+      "infrastructureNotes": "Reachable only by shallow-draft boats; houses Kabir’s sound archives.",
+      "visualPalette": "Salt marsh green, fog gray, rusted iron moorings, lighthouse beacon light"
+    }
+  ],
+  "factions": [
+    {
+      "id": "fac_south_gate",
+      "name": "South Gate Survivors",
+      "leaderOrKeyRep": "Rhea Mistry & Mara Ilyan",
+      "ideology": "Pragmatic, mutualist survival based on technical transparency and consent",
+      "materialInterests": "Securing clean water access and maintaining warning nodes",
+      "relationshipToSouthGate": "Home base and operational anchor"
+    },
+    {
+      "id": "fac_canal_commons",
+      "name": "The Canal Commons Council",
+      "leaderOrKeyRep": "Rotating neighborhood delegates (Sima Dey advising)",
+      "ideology": "Decentralized mutual aid; refusal of centralized emergency autocracy",
+      "materialInterests": "Fair distribution of food, medical supplies, and route safety",
+      "relationshipToSouthGate": "Allied neighbors dependent on floodgate stability"
+    },
+    {
+      "id": "fac_directorate",
+      "name": "Continuity Directorate",
+      "leaderOrKeyRep": "Tomas Vale",
+      "ideology": "Hierarchical central command; believes secrecy prevents panic",
+      "materialInterests": "Retaining control of siren network and emergency stockpiles",
+      "relationshipToSouthGate": "Claims official legal jurisdiction over Rhea’s facility"
+    }
+  ],
+  "originalityDeclarations": [
+    "Original fiction set in fictional city of Ternfall; not a real city or real public health event.",
+    "No character, dialogue, panel, or plot beat copied from Beanie Survives or any published manhwa.",
+    "No medical or survival advice claims; all factual engineering details sourced and reviewed."
+  ],
+  "createdAt": "2026-10-29T00:00:00.000Z",
+  "updatedAt": "2026-10-29T00:00:00.000Z"
+}

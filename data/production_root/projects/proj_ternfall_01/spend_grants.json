@@ -1,0 +1,32 @@
+[
+  {
+    "approvalId": "grant_1793274741957_z6b13",
+    "issuedBy": "Operator CLI",
+    "projectId": "proj_ternfall_01",
+    "episodeId": "all",
+    "maxBudgetUsd": 50,
+    "currency": "USD",
+    "allowedProviders": [
+      "gemini-nano-banana-2.1",
+      "gemini-omni-1.1-flash",
+      "chirp-3-hd"
+    ],
+    "expiresAt": "2026-10-30T11:52:21.957Z",
+    "isRevoked": false,
+    "actualSpentUsd": 0,
+    "createdAt": "2026-10-29T11:52:21.957Z"
+  },
+  {
+    "approvalId": "grant_1793275657440_7rxsw",
+    "issuedBy": "operator",
+    "projectId": "proj_ternfall_01",
+    "episodeId": "S01E002",
+    "maxBudgetUsd": 25,
+    "currency": "USD",
+    "allowedProviders": [],
+    "expiresAt": "2026-10-30T12:07:37.440Z",
+    "isRevoked": true,
+    "actualSpentUsd": 0,
+    "createdAt": "2026-10-29T12:07:37.440Z"
+  }
+]

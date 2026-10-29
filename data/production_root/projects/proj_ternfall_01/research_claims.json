@@ -1,0 +1,22 @@
+[
+  {
+    "id": "claim_001",
+    "projectId": "proj_ternfall_01",
+    "claimText": "Low-pressure municipal water mains can develop back-siphonage if negative pressure occurs during sudden main gate closure.",
+    "isFictionalLore": false,
+    "sourceUrl": "https://en.wikipedia.org/wiki/Backflow_prevention_device",
+    "sourceTitle": "Backflow Prevention & Water Distribution Hydraulics",
+    "publisher": "Municipal Water Engineering Standard Manual",
+    "accessDate": "2026-10-29",
+    "evidenceExcerpt": "Negative pressure (backsiphonage) occurs when reduced pressure in downstream piping pulls water back into distribution lines.",
+    "verificationStatus": "verified",
+    "confidenceScore": 0.95,
+    "factCheckerNotes": "Accurate real-world hydraulic principle used in Rhea’s dialogue at South Gate.",
+    "humanApproved": true,
+    "relatedEpisodeIds": [
+      "S01E001"
+    ],
+    "createdAt": "2026-10-29T00:00:00.000Z",
+    "updatedAt": "2026-10-29T00:00:00.000Z"
+  }
+]
