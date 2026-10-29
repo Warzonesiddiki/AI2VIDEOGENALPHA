@@ -427,19 +427,64 @@ export function getPilotVideoEssayData(): VideoEssayEpisode {
   };
 }
 
+export interface ColorGradingPreset {
+  id: string;
+  name: string;
+  description: string;
+  ffmpegFilter: string;
+  cssFilter: string;
+}
+
+export const COLOR_GRADING_PRESETS: ColorGradingPreset[] = [
+  {
+    id: 'fincher_nordic',
+    name: 'Fincher 35mm Cold Nordic',
+    description: 'Cold slate cyan shadows with warm sodium tungsten highlights. The standard for prestige psychological thrillers.',
+    ffmpegFilter: 'eq=contrast=1.18:saturation=0.88,colorbalance=rs=-0.05:gs=0.01:bs=0.06:rh=0.04:gh=0.02:bh=-0.02',
+    cssFilter: 'contrast(1.18) saturate(0.88) hue-rotate(-5deg)',
+  },
+  {
+    id: 'lemmino_investigative',
+    name: 'LEMMINO Deep Ocean Teal',
+    description: 'Deep maritime teal and charcoal black shadows. Maximizes curiosity and documentary dread.',
+    ffmpegFilter: 'eq=contrast=1.22:saturation=0.82:brightness=-0.02,colorbalance=rs=-0.08:gs=0.02:bs=0.09',
+    cssFilter: 'contrast(1.22) saturate(0.82) brightness(0.98)',
+  },
+  {
+    id: 'surveillance_1984',
+    name: '1984 Municipal Analog Tape',
+    description: 'Muted desaturated palette with subtle vintage analog warmth and industrial grit.',
+    ffmpegFilter: 'eq=contrast=1.12:saturation=0.72:brightness=0.01,colorbalance=rs=0.03:gs=0.02:bs=-0.04',
+    cssFilter: 'contrast(1.12) saturate(0.72) sepia(0.08)',
+  },
+  {
+    id: 'clean_broadcast',
+    name: '10-Bit Broadcast Master',
+    description: 'Neutral, clean color profile with maximum dynamic range and natural tones.',
+    ffmpegFilter: 'eq=contrast=1.05:saturation=1.02',
+    cssFilter: 'contrast(1.05) saturate(1.02)',
+  },
+];
+
 /**
  * Generates the complete, zero-flaw Windows Batch (.bat) and Linux Bash (.sh)
  * FFmpeg rendering scripts pre-tuned for the user's ThinkPad T14 (MX330 NVENC).
  */
-export function generateThinkPadT14RenderScripts(episode: VideoEssayEpisode): {
+export function generateThinkPadT14RenderScripts(
+  episode: VideoEssayEpisode,
+  colorGradeId: string = 'fincher_nordic'
+): {
   windowsBat: string;
   linuxSh: string;
   singleShotExample: string;
 } {
+  const grade = COLOR_GRADING_PRESETS.find((g) => g.id === colorGradeId) || COLOR_GRADING_PRESETS[0];
+
   const windowsBat = `@echo off
 REM ==============================================================================
 REM TERNFALL STUDIO - KINETIC VIDEO ESSAY RENDER ENGINE (ThinkPad T14 / MX330 NVENC)
 REM Hardware: Intel i7-10510U, 20GB RAM, NVIDIA GeForce MX330 (Pascal NVENC)
+REM Grade Profile: ${grade.name} (${grade.description})
 REM Output: 1080p 25fps Broadcast Cinema Master (Sub-90s Total Render)
 REM Estimated Credit Cost: $0.00 (Zero Credits)
 REM ==============================================================================
@@ -458,20 +503,18 @@ if %ERRORLEVEL% NEQ 0 (
     set VCODEC=h264_nvenc -preset p4 -rc:v vbr -b:v 8M -maxrate 12M -bufsize 16M
 )
 
-echo [2/4] Assembling ${episode.totalSlides} Illustrated Slides with Ken Burns Drift...
-
-REM Filter complex concatenation string
-REM Each slide applies a smooth 1.0x -> 1.15x push-in or pan, overlays rain/fog, and burns kinetic subtitles
+echo [2/4] Assembling ${episode.totalSlides} Illustrated Slides with Ken Burns Drift & 35mm Grade...
 
 ffmpeg -y ^
   -f concat -safe 0 -i "%~dp0slides_manifest.txt" ^
   -i "%~dp0audio/narration_master.wav" ^
   -i "%~dp0audio/sub_bass_pulse_55hz.wav" ^
   -filter_complex ^
-  "[1:a]volume=1.0[vocal]; ^
+  "[0:v]${grade.ffmpegFilter}[vgraded]; ^
+   [1:a]volume=1.0,highpass=f=80[vocal]; ^
    [2:a]volume=0.35,lowpass=f=120[sub]; ^
    [vocal][sub]amix=inputs=2:duration=first:dropout_transition=2[aout]" ^
-  -map 0:v -map "[aout]" ^
+  -map "[vgraded]" -map "[aout]" ^
   -c:v %VCODEC% ^
   -c:a aac -b:a 192k -ar 48000 ^
   -pix_fmt yuv420p ^
@@ -606,4 +649,359 @@ function formatSrtTimestamp(totalSeconds: number): string {
 
   const pad = (n: number, w: number = 2) => String(n).padStart(w, '0');
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)},${pad(milliseconds, 3)}`;
+}
+
+export interface NarratorVoicePersona {
+  id: string;
+  name: string;
+  edgeVoice: string;
+  locale: string;
+  role: string;
+  description: string;
+  pitchMod: string; // e.g. "-4Hz"
+  rateMod: string; // e.g. "-5%"
+  samplePhrase: string;
+  browserKeywords: string[];
+}
+
+export const NARRATOR_PERSONAS: NarratorVoicePersona[] = [
+  {
+    id: 'ryan_uk_investigator',
+    name: 'Ryan (BBC Documentary / LEMMINO Style)',
+    edgeVoice: 'en-GB-RyanNeural',
+    locale: 'en-GB',
+    role: 'Forensic Mystery Investigator',
+    description: 'Measured, cold British RP. The signature sound of high-retention investigative documentaries.',
+    pitchMod: '-3Hz',
+    rateMod: '-5%',
+    samplePhrase: 'At three minutes past midnight, the hydraulic sensors at Basin Three went completely silent.',
+    browserKeywords: ['Ryan', 'Natural', 'George', 'Daniel', 'UK English Male', 'en-GB'],
+  },
+  {
+    id: 'christopher_us_baritone',
+    name: 'Christopher (Deep Cinematic Baritone)',
+    edgeVoice: 'en-US-ChristopherNeural',
+    locale: 'en-US',
+    role: 'Grim Survivalist / Action Trailer',
+    description: 'Deep resonant chest voice with heavy gravitas. Ideal for catastrophic breaches and high dread.',
+    pitchMod: '-5Hz',
+    rateMod: '-8%',
+    samplePhrase: 'When the sea breached the secondary lock, there were no emergency protocols left to follow.',
+    browserKeywords: ['Christopher', 'Guy', 'David', 'US English Male', 'Natural', 'en-US'],
+  },
+  {
+    id: 'sonia_uk_forensic',
+    name: 'Sonia (Cold Forensic Analyst)',
+    edgeVoice: 'en-GB-SoniaNeural',
+    locale: 'en-GB',
+    role: 'Psychological Thriller / Intelligence',
+    description: 'Clinical, chilling, unflinching cadence. Excellent for official incident breakdowns.',
+    pitchMod: '-2Hz',
+    rateMod: '-4%',
+    samplePhrase: 'The maintenance logs from October 1984 were never classified. They simply ceased to exist.',
+    browserKeywords: ['Sonia', 'Libby', 'Natasha', 'Victoria', 'en-GB', 'Female'],
+  },
+  {
+    id: 'guy_us_broadcast',
+    name: 'Guy (Authoritative US Broadcast)',
+    edgeVoice: 'en-US-GuyNeural',
+    locale: 'en-US',
+    role: 'Investigative Journalist / Frontline',
+    description: 'Crisp, articulate American tenor with urgency and commanding presence.',
+    pitchMod: '-2Hz',
+    rateMod: '-3%',
+    samplePhrase: 'Engineers who descended into the lower conduits reported an acoustic frequency they could feel in their chest.',
+    browserKeywords: ['Guy', 'Natural', 'Eric', 'en-US'],
+  },
+  {
+    id: 'william_au_veteran',
+    name: 'William (Weathered Maritime Veteran)',
+    edgeVoice: 'en-AU-WilliamNeural',
+    locale: 'en-AU',
+    role: 'Gritty Survivalist / Harbor Watcher',
+    description: 'Weathered, gravelly coastal cadence with natural grit and survivalist authenticity.',
+    pitchMod: '-4Hz',
+    rateMod: '-6%',
+    samplePhrase: 'Anyone who spent a winter on the North Basin knows what happens when the salt fog rolls in.',
+    browserKeywords: ['William', 'Russell', 'en-AU'],
+  },
+];
+
+/**
+ * Generates an upgraded, zero-cost Edge-TTS batch script (Python & Windows Batch)
+ * with selectable persona, pitch modulation, and SSML pacing for YouTube broadcast quality.
+ */
+export function generateEdgeTtsScript(
+  episode: VideoEssayEpisode,
+  personaId: string = 'ryan_uk_investigator',
+  rateOverride?: string,
+  pitchOverride?: string
+): string {
+  const persona = NARRATOR_PERSONAS.find((p) => p.id === personaId) || NARRATOR_PERSONAS[0];
+  const rate = rateOverride || persona.rateMod;
+  const pitch = pitchOverride || persona.pitchMod;
+
+  const lines = episode.slides
+    .map((s) => {
+      const escapedScript = s.narratorScript.replace(/"/g, '\\"');
+      const numPad = String(s.slideNumber).padStart(2, '0');
+      return `echo [Voice ${persona.edgeVoice}] Slide ${numPad}/${episode.totalSlides}...
+edge-tts --voice "${persona.edgeVoice}" --rate="${rate}" --pitch="${pitch}" --volume="+0%" --text "${escapedScript}" --write-media "audio/slide_${numPad}.mp3"`;
+    })
+    .join('\n');
+
+  return `@echo off
+REM ==============================================================================
+REM TERNFALL STUDIO - UPGRADED BROADCAST NARRATOR GENERATOR (Edge-TTS Engine)
+REM Voice Persona: ${persona.name} (${persona.edgeVoice})
+REM Role: ${persona.role}
+REM Tuning: Rate ${rate} | Pitch ${pitch} (Sub-145 WPM Tension Timbre)
+REM Cost: $0.00 / Zero Subscriptions
+REM ==============================================================================
+
+echo [Ternfall Studio] Initializing Upgraded Voiceover Engine...
+echo [Persona] ${persona.name}
+echo [Settings] Rate: ${rate} ^| Pitch: ${pitch}
+mkdir "%~dp0audio" 2>nul
+
+where edge-tts >nul 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] edge-tts is not installed.
+    echo Please install it in 5 seconds via: pip install edge-tts
+    pause
+    exit /b 1
+)
+
+${lines}
+
+echo.
+echo [Edge-TTS] Concatenating 36 narrator clips into master broadcast track...
+(for %%i in (audio\\slide_*.mp3) do @echo file '%%i') > audio\\audio_manifest.txt
+ffmpeg -y -f concat -safe 0 -i audio\\audio_manifest.txt ^
+  -af "highpass=f=80,acompressor=threshold=-18dB:ratio=3:attack=5:release=50" ^
+  -c:a pcm_s16le -ar 48000 "audio/narration_master.wav"
+
+echo.
+echo [SUCCESS] Master voiceover generated at: audio/narration_master.wav
+echo Ready for ThinkPad T14 NVENC assembly!
+`;
+}
+
+/**
+ * Generates an automated 9:16 Shorts / Vertical Video Render Script
+ * to repurpose key suspense moments for YouTube Shorts and TikTok.
+ */
+export function generateShortsRenderScript(episode: VideoEssayEpisode): string {
+  return `@echo off
+REM ==============================================================================
+REM TERNFALL STUDIO - VIRAL 9:16 YOUTUBE SHORTS EXTRACTION (ThinkPad MX330 NVENC)
+REM Automatically crops and renders 3 high-impact cliffhangers for Shorts/Reels/TikTok
+REM ==============================================================================
+
+mkdir "%~dp0output\\shorts" 2>nul
+
+echo [Short 1/3] Rendering Hook: The 03:00 Basin Breach (Slides 1-4)...
+ffmpeg -y -ss 00:00:00 -to 00:01:05 -i "output/${episode.episodeId}_video_essay_master.mp4" ^
+  -vf "crop=ih*(9/16):ih,scale=1080:1920" ^
+  -c:v h264_nvenc -preset p4 -b:v 6M ^
+  -c:a aac -b:a 192k ^
+  "output/shorts/Short_01_Basin_Breach_9x16.mp4"
+
+echo [Short 2/3] Rendering Climax: The Acoustic Resonance (Slides 18-21)...
+ffmpeg -y -ss 00:04:30 -to 00:05:30 -i "output/${episode.episodeId}_video_essay_master.mp4" ^
+  -vf "crop=ih*(9/16):ih,scale=1080:1920" ^
+  -c:v h264_nvenc -preset p4 -b:v 6M ^
+  -c:a aac -b:a 192k ^
+  "output/shorts/Short_02_Acoustic_Trap_9x16.mp4"
+
+echo [Short 3/3] Rendering Cliffhanger: The Siphon Valve Failure (Slides 32-36)...
+ffmpeg -y -ss 00:08:15 -to 00:09:20 -i "output/${episode.episodeId}_video_essay_master.mp4" ^
+  -vf "crop=ih*(9/16):ih,scale=1080:1920" ^
+  -c:v h264_nvenc -preset p4 -b:v 6M ^
+  -c:a aac -b:a 192k ^
+  "output/shorts/Short_03_Cliffhanger_9x16.mp4"
+
+echo [SUCCESS] 3 YouTube Shorts rendered in output/shorts/
+`;
+}
+
+/**
+ * Generates the All-In-One Master Pipeline Orchestrator Script (run_master_production_pipeline.bat)
+ * A single double-click script that executes the complete 60-minute daily production routine.
+ */
+export function generateMasterOrchestratorScript(
+  episode: VideoEssayEpisode,
+  personaId: string = 'ryan_uk_investigator',
+  colorGradeId: string = 'fincher_nordic'
+): string {
+  const persona = NARRATOR_PERSONAS.find((p) => p.id === personaId) || NARRATOR_PERSONAS[0];
+  const grade = COLOR_GRADING_PRESETS.find((g) => g.id === colorGradeId) || COLOR_GRADING_PRESETS[0];
+
+  return `@echo off
+REM ==============================================================================
+REM TERNFALL STUDIO - ALL-IN-ONE MASTER PRODUCTION PIPELINE
+REM Episode: ${episode.episodeId} - ${episode.title}
+REM Narrator: ${persona.name} (${persona.edgeVoice})
+REM Color Grade: ${grade.name}
+REM Hardware Target: Lenovo ThinkPad T14 Gen 1 (NVIDIA GeForce MX330 NVENC)
+REM Total Financial / Credit Cost: $0.00 (Zero Credits)
+REM ==============================================================================
+
+setlocal EnableDelayedExpansion
+title Ternfall Studio - ${episode.episodeId} Master Production Pipeline
+
+echo ==============================================================================
+echo [TERNFALL STUDIO] INITIATING DAILY BROADCAST PRODUCTION
+echo Episode: ${episode.title} (${episode.totalSlides} Slides)
+echo Target: 1080p 25fps Master + 3 Viral 9:16 Shorts
+echo ==============================================================================
+echo.
+
+REM 1. PRE-FLIGHT DIRECTORY SETUP
+echo [1/6] Initializing Project Directory Structure...
+mkdir "%~dp0data\\stills" 2>nul
+mkdir "%~dp0audio" 2>nul
+mkdir "%~dp0output" 2>nul
+mkdir "%~dp0output\\shorts" 2>nul
+mkdir "%~dp0manifests" 2>nul
+
+REM 2. CHECK PREREQUISITES
+echo [2/6] Verifying Hardware & Software Toolchain...
+where ffmpeg >nul 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] FFmpeg not found in PATH!
+    echo Run: winget install Gyan.FFmpeg
+    pause
+    exit /b 1
+)
+
+where edge-tts >nul 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo [ERROR] edge-tts not found!
+    echo Run: pip install edge-tts
+    pause
+    exit /b 1
+)
+
+REM 3. SYNTHESIZE 55HZ SUB-BASS TENSION DRONE
+echo [3/6] Engineering 55Hz Sub-Bass Ambient Frequency...
+ffmpeg -y -f lavfi -i "sine=frequency=55:duration=620" ^
+  -af "volume=0.25,lowpass=f=110" ^
+  -c:a pcm_s16le -ar 48000 "%~dp0audio\\sub_bass_pulse_55hz.wav" -hide_banner -loglevel error
+
+REM 4. SYNTHESIZE NARRATOR VOICEOVER VIA EDGE-TTS
+echo [4/6] Synthesizing Voiceover with ${persona.name}...
+call "%~dp0generate_voiceover.bat"
+
+REM 5. ASSEMBLE 1080P MASTER VIDEO VIA MX330 NVENC
+echo [5/6] Encoding Master Video with 35mm ${grade.name} Grade via NVENC...
+call "%~dp0render_video_essay_nvenc.bat"
+
+REM 6. EXTRACT 3 VIRAL SHORTS FOR YOUTUBE
+echo [6/6] Extracting 3 Vertical 9:16 Shorts for YouTube & TikTok...
+call "%~dp0render_shorts_9x16.bat"
+
+echo.
+echo ==============================================================================
+echo [SUCCESS] DAILY EPISODE PRODUCTION COMPLETE!
+echo Master Video: %~dp0output\\${episode.episodeId}_video_essay_master.mp4
+echo Shorts Clips: %~dp0output\\shorts\\ (3 files)
+echo Total Cost: $0.00 / 0 Credits Used
+echo ==============================================================================
+explorer "%~dp0output"
+pause
+`;
+}
+
+/**
+ * Returns the complete Season 1 Episode Catalog for Ternfall Studio.
+ */
+export function getEpisodesCatalog(): VideoEssayEpisode[] {
+  const ep1 = getPilotVideoEssayData();
+
+  // Episode 2: The Echo in the Conduits
+  const ep2Slides: IllustratedSlide[] = [
+    {
+      id: 's02_01',
+      slideNumber: 1,
+      chapterIndex: 1,
+      chapterTitle: 'The Harmonic Vibration',
+      timecodeStart: '00:00',
+      timecodeEnd: '00:16',
+      durationSeconds: 16,
+      storyBeat: 'Acoustic Resonance Discovery',
+      visualDescription: 'Subterranean concrete conduit junction, condensation vibrating into concentric acoustic wave patterns on dark pool water.',
+      flowPrompt: 'Cinematic wide interior shot of a subterranean circular concrete drainage conduit, standing dark saltwater pool forming perfect concentric sonic vibration rings, sodium vapor bulb hanging on damp cable, cold maritime thriller, 35mm film still, photorealistic',
+      flowNegativePrompt: 'bright colors, modern sci-fi, cartoon, plastic textures',
+      narratorScript: 'Three days after Basin Three was sealed, the municipal telemetry center recorded an acoustic frequency that structural sensors had never observed before.',
+      wordCount: 22,
+      cameraMovement: 'slow_push_in',
+      overlayEffect: 'water_ripples',
+      soundCue: { sfxType: 'sub_bass_pulse_55hz', volume: 0.85 },
+      highlightKeywords: ['acoustic frequency', 'structural sensors'],
+      visualTheme: { primaryColor: '#08171c', accentColor: '#38bdf8', contrast: 1.25, filmGrain: 0.15 },
+    },
+    {
+      id: 's02_02',
+      slideNumber: 2,
+      chapterIndex: 1,
+      chapterTitle: 'The Harmonic Vibration',
+      timecodeStart: '00:16',
+      timecodeEnd: '00:34',
+      durationSeconds: 18,
+      storyBeat: 'The Human Ear Threshold',
+      visualDescription: 'Lead audio investigator Thomas Vance kneeling on iron catwalk with analog reel-to-reel Nagra recorder and parabolic microphone.',
+      flowPrompt: 'Cinematic medium shot, 45-year-old audio investigator in heavy wool coat holding an analog directional microphone toward dark flooded conduit, vintage Nagra reel-to-reel recorder on rusted metal case, cold blue fog, muted industrial grading, film grain',
+      flowNegativePrompt: 'digital gear, smartphones, bright sunlight, clean room',
+      narratorScript: 'Fifty-five hertz is at the bottom edge of human hearing. You do not hear it with your ears. You feel it in your jawbone, vibrating behind your teeth like an idling turbine.',
+      wordCount: 31,
+      cameraMovement: 'pan_left_to_right',
+      overlayEffect: 'salt_fog',
+      soundCue: { sfxType: 'generator_hum', volume: 0.7 },
+      highlightKeywords: ['Fifty-five hertz', 'vibrating behind your teeth'],
+      visualTheme: { primaryColor: '#0a1d22', accentColor: '#f59e0b', contrast: 1.2, filmGrain: 0.14 },
+    },
+    {
+      id: 's02_03',
+      slideNumber: 3,
+      chapterIndex: 1,
+      chapterTitle: 'The Conduits',
+      timecodeStart: '00:34',
+      timecodeEnd: '00:54',
+      durationSeconds: 20,
+      storyBeat: 'The Resonance Cavity',
+      visualDescription: 'Blueprints of the 1938 sea gates illuminated by amber desk lamp with red grease pencil circles around subterranean air shafts.',
+      flowPrompt: 'Cinematic top-down view of weathered maritime architectural blueprints from 1938 spread on wooden drafting table, red grease pencil markings highlighting subterranean drainage lock chambers, brass compass and magnifying glass, moody side-lighting, film still',
+      flowNegativePrompt: 'CAD software, computer monitor, clean modern paper',
+      narratorScript: 'When the engineers consulted the original 1938 harbor schematics, they realized the conduits had not been built to drain water. They had been built as acoustic resonators.',
+      wordCount: 27,
+      cameraMovement: 'slow_pull_out',
+      overlayEffect: 'dust_motes',
+      soundCue: { sfxType: 'metallic_creak', volume: 0.6 },
+      highlightKeywords: ['1938 harbor schematics', 'acoustic resonators'],
+      visualTheme: { primaryColor: '#0b1619', accentColor: '#10b981', contrast: 1.3, filmGrain: 0.16 },
+    },
+    ...ep1.slides.slice(3, 18).map((s, idx) => ({
+      ...s,
+      id: `s02_${idx + 4}`,
+      slideNumber: idx + 4,
+      chapterTitle: `Investigation: Chamber ${idx + 1}`,
+    })),
+  ];
+
+  const ep2: VideoEssayEpisode = {
+    episodeId: 'S01E02',
+    title: 'The Echo in the Conduits',
+    subtitle: 'The 55Hz Subterranean Resonance Frequency',
+    totalDurationSeconds: ep2Slides.reduce((acc, s) => acc + s.durationSeconds, 0),
+    totalSlides: ep2Slides.length,
+    totalWordCount: ep2Slides.reduce((acc, s) => acc + s.wordCount, 0),
+    avgWpm: 142,
+    aspectRatio: '16:9',
+    googleFlowCreditsCost: 0,
+    estimatedRenderTimeSecondsOnMX330: 55,
+    slides: ep2Slides,
+  };
+
+  return [ep1, ep2];
 }
