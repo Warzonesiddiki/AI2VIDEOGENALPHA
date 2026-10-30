@@ -27,7 +27,7 @@ npm run studio -- episode check S01E001 --json
 npm run studio -- continuity report --json
 
 # Expand a 10-episode arc (Hard cap: max 20 cards per batch)
-npm run studio -- arc expand --arc 1 --count 10 --json
+npm run studio -- arc expand --arc 1 --count 10 --idempotency-key operator-batch-001 --json
 
 # Add research claim with SSRF protection
 npm run studio -- research add "Low pressure mains can siphon" --url "https://en.wikipedia.org/..." --json

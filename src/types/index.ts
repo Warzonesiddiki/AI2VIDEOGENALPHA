@@ -51,6 +51,7 @@ export interface JobLogEntry {
 }
 
 export interface GenerationJob {
+  revision?: number;
   id: string;
   projectId: string;
   episodeId?: string;
@@ -94,6 +95,7 @@ export interface GenerationJob {
 // ---------------------------------------------------------------------------
 
 export interface ProjectMetadata {
+  revision?: number;
   id: string;
   name: string;
   slug: string;
@@ -150,6 +152,7 @@ export interface FactionSheet {
 }
 
 export interface SeriesBible {
+  revision?: number;
   id: string;
   projectId: string;
   seriesTitle: string;
@@ -261,6 +264,7 @@ export interface EpisodeOutlineBeat {
 }
 
 export interface EpisodeCard {
+  revision?: number; // Legacy records start at revision 0; writes require the loaded revision.
   id: string; // e.g. "S01E001"
   dbId: string;
   projectId: string;
@@ -321,6 +325,7 @@ export type FactVerificationState =
   | 'fictional_rule';
 
 export interface ResearchClaim {
+  revision?: number;
   id: string;
   projectId: string;
   claimText: string;
@@ -430,6 +435,7 @@ export interface AutoproduceStage {
 }
 
 export interface AutoproduceRun {
+  revision?: number;
   runId: string;
   projectId: string;
   episodeId: string;
@@ -453,6 +459,8 @@ export interface AutoproduceRun {
 // ---------------------------------------------------------------------------
 
 export interface YouTubePackage {
+  revision?: number;
+  projectId?: string;
   id: string;
   episodeId: string;
   workingTitle: string;
@@ -489,7 +497,7 @@ export interface YouTubePackage {
     audioClippingDetected: boolean;
     aspectRatioConfirmed: boolean;
     missingFrames: boolean;
-    loudnessLufs: number;
+    loudnessLufs: number | null;
     issues: string[];
   };
   createdAt: string;
@@ -551,7 +559,7 @@ export interface SystemDiagnostics {
     modality: 'text' | 'image' | 'video' | 'tts' | 'search';
     modelId: string;
     isConfigured: boolean;
-    status: 'ready' | 'unconfigured' | 'retired' | 'missing_key';
+    status: 'ready' | 'configured_unverified' | 'unconfigured' | 'retired' | 'missing_key';
     estimatedCostBasis: string;
   }>;
   youtubeOAuth: {
@@ -577,7 +585,8 @@ export interface GoogleFlowAccount {
   slot: FlowAccountSlot;
   label: string;
   emailOrIdentifier: string;
-  isPro: true;
+  isPro: boolean;
+  telemetryVerified?: boolean;
   dailyBatchQuota: number; // e.g. 200 batches
   batchesAssigned: number;
   batchesCompleted: number;
@@ -605,6 +614,10 @@ export interface GoogleFlowBatchPrompt {
   styleIngredients: string[];
 }
 
+export interface FlowFrameEvidence {
+  file: string; globalFrameNumber: number; sha256: string; width: number; height: number; bytes: number;
+}
+
 export interface GoogleFlowBatch {
   batchId: string; // e.g. "GF_S01E001_B001"
   batchIndex: number; // 1 to 600
@@ -618,7 +631,8 @@ export interface GoogleFlowBatch {
   dramaticPacing: string;
   prompts: GoogleFlowBatchPrompt[];
   status: GoogleFlowBatchStatus;
-  framesExpected: 24;
+  framesExpected: number; // Final batches may contain fewer than 24 frames.
+  verification?: { version: 1; checkedAt: string; frames: FlowFrameEvidence[] };
   ingestedFrameCount: number;
   ingestedFiles: string[];
   missingFrames: number[];
@@ -627,6 +641,8 @@ export interface GoogleFlowBatch {
 }
 
 export interface GoogleFlowPlan {
+  revision?: number;
+  projectId?: string;
   episodeId: string;
   episodeTitle: string;
   mode: 'dense_24fps' | 'keyframe_storyboard';
@@ -693,7 +709,7 @@ export interface FlowAutoproduceResult {
   qcStatus: {
     resolution: string;
     fps: number;
-    loudnessLufs: number;
+    loudnessLufs: number | null;
     passed: boolean;
   };
   totalFramesVerified: number;

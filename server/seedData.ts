@@ -1,3 +1,4 @@
+import { PILOT_NARRATION, PILOT_WORD_COUNT, PILOT_ESTIMATED_SECONDS, PILOT_BEATS } from './pilotStory.ts';
 /**
  * Ternfall Studio - Seed Data
  * Directly seeded from 09_ORIGINAL_SERIES_BIBLE_AND_1000_EPISODE_BACKBONE.md.
@@ -343,15 +344,15 @@ export const PILOT_EPISODE_CARD: EpisodeCard = {
   settingIds: ['loc_south_gate'],
   povCharacterIds: ['rhea-mistry', 'mara-ilyan'],
   aPlot: 'Rhea diagnoses pressure oscillations at South Gate sluice and manually opens the upper bypass to save trapped workers.',
-  bPlot: 'Mara discovers the infected turning toward mechanical pump vibrations rather than human voices, raising the first clue about the pulse.',
+  bPlot: 'Mara challenges Rhea’s unsupported certainty and retrieves a hand-drawn connection that may link their rescue to the northern pulse.',
   physicalObjective: 'Manually shift the high bypass valve and seal the lower corridor before the drainage basin floods.',
-  humanConflict: 'One trapped worker wants to wait for a missing colleague, while another urges immediate gate closure.',
+  humanConflict: 'Rhea wants to preserve the north route and engineering records; Mara insists the trapped workers receive the truth and a voice in the rescue decision.',
   characterTurn: 'Rhea admits her digital panel is giving false information and relies on physical hand gauges and community consensus.',
   majorDecision: 'Rhea executes a controlled gate shift that saves the workers but permanently submerges the lower records archive.',
   consequence: 'The shift crew is safe in the upper mezzanine, but Rhea loses her primary engineering blueprint files.',
   clueOrPayoff: 'The 8-beat rhythm is mechanical, not supernatural; a second pulse begins answering from the north terminal.',
-  endingBeat: 'Rhea sketches an uncertain map by sodium light as a second siren pulse begins in the distant dark.',
-  status: 'script_approved',
+  endingBeat: 'A planted bypass connection suggests their rescue may have restarted a northern pump near a rescued worker’s daughter; Rhea admits uncertainty and Mara shares the unfinished map.',
+  status: 'script_draft',
   visualMotifs: ['twitching brass pressure needle', 'tide marks on peeling concrete', 'sodium-amber water reflections'],
   factualClaimIds: ['claim_001'],
   fictionalRuleIds: ['rule_infection_vector', 'rule_still_behavior', 'rule_eight_beat_pulse'],
@@ -361,120 +362,19 @@ export const PILOT_EPISODE_CARD: EpisodeCard = {
     {
       versionNumber: 1,
       targetWpm: 145,
-      wordCount: 2180,
-      estimatedDurationSeconds: 902, // 15:02 runtime
-      actualVoiceDurationSeconds: 902,
-      isApproved: true,
-      approvedBy: 'Showrunner (Human Editorial Review)',
-      approvalNotes: 'Matches all 9 pilot beats from Series Bible; canon invariants strictly maintained.',
+      wordCount: PILOT_WORD_COUNT,
+      estimatedDurationSeconds: PILOT_ESTIMATED_SECONDS, // Estimate, not measured voice.
+      isApproved: false,
+      author: 'Repository editorial draft (unreviewed)',
+      approvalNotes: 'Unreviewed original rewrite; technical claims, continuity, timing and editorial quality require human review.',
       createdAt: '2026-10-29T00:00:00.000Z',
       pronunciationNotes: [
         { term: 'Mistry', guide: 'MIS-tree' },
         { term: 'Ilyan', guide: 'EEL-yahn' },
         { term: 'Ternfall', guide: 'TURN-fawl' },
       ],
-      beats: [
-        {
-          timestampStart: '00:00',
-          timestampEnd: '00:25',
-          beatName: 'Cold Open: The Eight Twitch Needle',
-          dramaticFunction: 'Hook viewer with physical mechanical mystery rather than gore shock',
-          dialogueOrNarrationSnippet:
-            'The brass needle on the Basin Three gauge did not tremble. It twitched eight times, paused for exactly three seconds, and twitched eight times again. On the wall above Rhea Mistry’s head, the city’s official alarm screen remained steady green.',
-        },
-        {
-          timestampStart: '00:25',
-          timestampEnd: '01:30',
-          beatName: 'Premise: The Silent Warning',
-          dramaticFunction: 'Establish Rhea’s role, the city’s brittle infrastructure, and Kabir’s missing voice',
-          dialogueOrNarrationSnippet:
-            'Rhea was thirty-one, wore a cropped slate-teal rain jacket stiff with salt mist, and knew the low-pressure lines better than the engineers who drew the digital maps. Her brother Kabir had sent a text three hours earlier: "Can you still hear the pump channel?" She had dismissed it as an archivist’s obsession.',
-        },
-        {
-          timestampStart: '01:30',
-          timestampEnd: '03:00',
-          beatName: 'Inciting Failure: The False Dial',
-          dramaticFunction: 'Reveal institutional failure—digital console contradicts physical reality',
-          dialogueOrNarrationSnippet:
-            'Down on the lower catwalk, the work lights flickered once and died. The SCADA monitor flashed "Gate Open." But when Rhea looked down through the iron grating, the heavy cast sluice door was jammed shut against the silt bed. The water level in Basin Three was climbing half an inch a minute.',
-        },
-        {
-          timestampStart: '03:00',
-          timestampEnd: '05:00',
-          beatName: 'Human Encounter: The Locked Hatch',
-          dramaticFunction: 'Introduce Mara Ilyan and the human dilemma of trapped night workers',
-          dialogueOrNarrationSnippet:
-            'Mara Ilyan was already hammering on the service hatch with an eighteen-inch pipe wrench. "Two night-shift mechanics are inside," Mara said, grease smudging her jaw. "The electronic latch tripped on safe-lock. If we don’t clear the upper bypass, the water will seal them in."',
-        },
-        {
-          timestampStart: '05:00',
-          timestampEnd: '07:00',
-          beatName: 'First Evidence: Moving to the Pulse',
-          dramaticFunction: 'Show the fictional behavior of The Still: responding to rhythm, not shouting',
-          dialogueOrNarrationSnippet:
-            'Across the flooded service canal, four figures stood knee-deep in the murky drainage. They did not sprint, and they did not roar. Their heads turned in unison—not toward Mara’s banging wrench, but toward the rhythmic shudder of the diesel pump. One, two, three, four, five, six, seven, eight. Then a pause.',
-        },
-        {
-          timestampStart: '07:00',
-          timestampEnd: '09:30',
-          beatName: 'Moral Choice: Shifting the Gate',
-          dramaticFunction: 'Force a real operational sacrifice with permanent consequences',
-          dialogueOrNarrationSnippet:
-            '"If we cut the pump to silence the rhythm," Rhea said, her fingers tightening around the cold brass wheel, "the lower chamber floods completely. We lose the archive, the blueprints, and the clean intake. But if we leave it running, those things will climb the catwalk."',
-        },
-        {
-          timestampStart: '09:30',
-          timestampEnd: '12:30',
-          beatName: 'Action & Consequence: Controlled Shift',
-          dramaticFunction: 'Physical execution of manual gate shift; extraction of workers',
-          dialogueOrNarrationSnippet:
-            'Together, Rhea and Mara threw their weight into the auxiliary bypass wheel. Iron ground against rust. The upper sluice groaned open, spilling brown water out into the salt estuary. The trapped shift mechanics tumbled out onto the dry upper mezzanine just as black water rushed into the lower blueprint room.',
-        },
-        {
-          timestampStart: '12:30',
-          timestampEnd: '14:20',
-          beatName: 'Aftermath: Sketching by Sodium Light',
-          dramaticFunction: 'Rhea records the loss on paper; unverified radio fragment',
-          dialogueOrNarrationSnippet:
-            'Sitting on an overturned battery crate, Rhea tore a blank sheet from her survey ledger. She drew the corridor from memory, marking the flooded passage with two red slashes and a question mark. On Mara’s battery radio, static hissed, then a fragment of Kabir’s voice: "If you can hear this... don’t trust the siren line..."',
-        },
-        {
-          timestampStart: '14:20',
-          timestampEnd: '15:00',
-          beatName: 'Cliffhanger: The Second Pulse',
-          dramaticFunction: 'Expand the threat from local mishap to citywide systemic mystery',
-          dialogueOrNarrationSnippet:
-            'The South Gate pump finally sputtered and fell dark. Silence settled over the estuary basin. Then, from four miles north across the blacked-out city, through the cold salt fog, another pump answered: one, two, three, four, five, six, seven, eight.',
-        },
-      ],
-      fullNarrationText: `[Cold Open 00:00]
-The brass needle on the Basin Three gauge did not tremble. It twitched eight times, paused for exactly three seconds, and twitched eight times again. On the wall above Rhea Mistry’s head, the city’s official alarm screen remained a steady, tranquil green.
-
-[Premise 00:25]
-Rhea was thirty-one, wore a cropped slate-teal rain jacket stiff with salt mist, and knew the low-pressure lines better than the engineers who drew the digital maps. Her brother Kabir had sent a text three hours earlier: "Can you still hear the pump channel?" She had dismissed it as an archivist’s obsession. Now, the quiet felt heavier than ten atmospheres of head pressure. Ternfall’s emergency siren network was silent, yet the drainage canals were beginning to churn.
-
-[Inciting Failure 01:30]
-Down on the lower catwalk, the work lights flickered once and died. The SCADA monitor flashed "Gate Open." But when Rhea looked down through the iron grating, the heavy cast sluice door was jammed shut against the silt bed. The water level in Basin Three was climbing half an inch a minute. If the barrier didn't open before high tide, the entire South Gate ward would be underwater before dawn.
-
-[Human Encounter 03:00]
-Mara Ilyan was already hammering on the service hatch with an eighteen-inch pipe wrench. "Two night-shift mechanics are inside," Mara said, grease smudging her jaw. "The electronic latch tripped on safe-lock. If we don’t clear the upper bypass, the water will seal them in."
-"The emergency override is offline," Rhea answered, shining her beam into the dark sump. "Tomas Vale’s Directorate locked down central controls."
-
-[First Evidence 05:00]
-Across the flooded service canal, four figures stood knee-deep in the murky drainage. They did not sprint, and they did not roar. Their heads turned in unison—not toward Mara’s banging wrench, but toward the rhythmic shudder of the diesel pump. One, two, three, four, five, six, seven, eight. Then a pause. The Still moved with mechanical fidelity, drawn not by the smell of blood or the sound of human voices, but by the low-frequency thrum humming through the iron floorboards.
-
-[Moral Choice 07:00]
-"If we cut the pump to silence the rhythm," Rhea said, her fingers tightening around the cold brass wheel, "the lower chamber floods completely. We lose the archive, the blueprints, and the clean intake. But if we leave it running, those things will climb the catwalk."
-Mara gripped the opposite spoke. "Drawings can be remade. People can’t."
-
-[Action & Consequence 09:30]
-Together, Rhea and Mara threw their weight into the auxiliary bypass wheel. Iron ground against rust. The upper sluice groaned open, spilling brown water out into the salt estuary. The trapped shift mechanics tumbled out onto the dry upper mezzanine just as black water rushed into the lower blueprint room, drowning forty years of municipal flood records in muddy silt.
-
-[Aftermath 12:30]
-Sitting on an overturned battery crate, Rhea tore a blank sheet from her survey ledger. She drew the corridor from memory, marking the flooded passage with two red slashes and a question mark. On Mara’s battery radio, static hissed, then a fragment of Kabir’s voice broke through: "If you can hear this... don’t trust the siren line... they’re listening to the pulse..."
-
-[Cliffhanger 14:20]
-The South Gate pump finally sputtered and fell dark. Silence settled over the estuary basin. Then, from four miles north across the blacked-out city, through the cold salt fog, another pump answered: one, two, three, four, five, six, seven, eight.`,
+      beats: PILOT_BEATS,
+      fullNarrationText: PILOT_NARRATION,
     },
   ],
   createdAt: '2026-10-29T00:00:00.000Z',

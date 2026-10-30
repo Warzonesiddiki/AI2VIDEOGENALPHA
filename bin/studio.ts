@@ -1,4 +1,9 @@
 #!/usr/bin/env tsx
+import { reviewStoryCraft } from '../src/core/storyCraft.ts';
+import { verifyFlowBatch } from '../server/flowVerification.ts';
+import { localMedia } from '../server/localMedia.ts';
+import 'dotenv/config';
+import { safePath, assertIdentifier } from '../server/lib/paths.ts';
 /**
  * Ternfall Studio - Safe Application CLI (`studio`)
  * Exposes a stable, typed, versioned automation interface for operators and OpenCode.
@@ -24,7 +29,6 @@ import { EpisodeCard, SpendApprovalGrant, CanonEvent, GoogleFlowPlan, GoogleFlow
 import {
   createGoogleFlowPlan,
   validateBatchIngestion,
-  generateFfmpeg24fpsStitchScript,
   computeFlowCheckpoint,
   createFlowAutoproduceOrchestrator,
 } from '../src/core/flow.ts';
@@ -104,12 +108,7 @@ function printError(message: string, isJson: boolean, exitCode = 1): never {
  * Validates path security: rejects directory traversal (..) and symlink escape.
  */
 export function validateSafeProjectPath(targetPath: string, allowedRoot: string): string {
-  const resolved = path.resolve(allowedRoot, targetPath);
-  const normalizedRoot = path.resolve(allowedRoot);
-  if (!resolved.startsWith(normalizedRoot)) {
-    throw new Error(`Security Violation: Path traversal outside authorized project root is rejected: ${targetPath}`);
-  }
-  return resolved;
+  return safePath(allowedRoot, targetPath);
 }
 
 async function main() {
@@ -130,8 +129,8 @@ COMMANDS:
   studio doctor [--json]
       Inspect runtime, storage, FFmpeg/FFprobe, OpenCode and provider health.
 
-  studio project list|create <name>|open <id>|backup|restore
-      Manage local-first production projects.
+  studio project list|show <id>|create <name>|archive <id>|unarchive <id>|backup
+      Archive/unarchive requires --expected-revision <revision from show/list>. Metadata backup excludes media.
 
   studio series list|validate|export
       Inspect world bible, cast sheets, and world rules.
@@ -148,7 +147,7 @@ COMMANDS:
   studio episode add-beat <epId> --name <beatName> --snippet <dialogueOrSnippet>
       Add or update a narrative beat on an episode's beat sheet.
 
-  studio arc expand --arc <number> [--count <n>]
+  studio arc expand --arc <number> [--count <n>] --idempotency-key <key>
       Expand a 10-episode arc into distinct cards (Hard cap: max 20 cards).
 
   studio research list|add <claim> [--url <url>]
@@ -166,8 +165,14 @@ COMMANDS:
   studio episode produce --episode <id> --approval-id <id> [--profile <profile>]
       Trigger supervised autoproduction run within user-authorized spend cap.
 
+  studio media purge-checkpoints <render-id>  (terminal jobs only; retains sources/exports)
+  studio media enqueue --episode <id> --frames <24..21600> --audio narration.wav --idempotency-key <key>
+      Queue a real local 1080p render using existing PNGs and original audio (no provider spend).
+  studio media work|status [jobId]|cancel <jobId>|retry <jobId>|recover
+      Process one queued render, inspect measured results, cancel/retry, or recover dead workers.
+
   studio render script <epId> [--save]
-      Generate local 1080p FFmpeg shell script for offline audio/video stitching.
+      Retired: no scripts are generated. Use studio media enqueue/work with supplied assets.
 
   studio run status <runId>|resume <runId>|cancel <runId>
       Inspect or control resumable autoproducer jobs.
@@ -189,6 +194,8 @@ FLAGS:
 
   await storage.init();
   const defaultProjectId = (cli.flags.project as string) || 'proj_ternfall_01';
+  assertIdentifier(defaultProjectId);
+  for (const value of [cli.flags.episode, cli.flags.id]) if (value !== undefined) assertIdentifier(value);
 
   try {
     switch (cli.command) {
@@ -205,11 +212,23 @@ FLAGS:
         } else if (cli.subcommand === 'create') {
           const name = cli.args[0] || (cli.flags.name as string);
           if (!name) printError('Project name required for "studio project create <name>"', cli.isJson);
-          const project = await storage.createProject(name, '');
+          const project = await storage.createProject(name, (cli.flags.description as string) ?? '');
+          printResult(project, cli.isJson);
+        } else if (cli.subcommand === 'show') {
+          const id = cli.args[0] || defaultProjectId; assertIdentifier(id);
+          const project = await storage.getProject(id);
+          if (!project) throw new Error('Project not found');
+          printResult(project, cli.isJson);
+        } else if (cli.subcommand === 'archive' || cli.subcommand === 'unarchive') {
+          const id = cli.args[0] || defaultProjectId; assertIdentifier(id);
+          const token = cli.flags['expected-revision'];
+          if (typeof token !== 'string' || !/^\d+$/.test(token)) throw new Error('Archive/unarchive requires --expected-revision from project show/list');
+          const project = await storage.archiveProject(id, cli.subcommand === 'archive', Number(token));
+          if (!project) throw new Error('Project not found');
           printResult(project, cli.isJson);
         } else if (cli.subcommand === 'backup') {
-          const project = await storage.getProject(defaultProjectId);
-          printResult({ status: 'backup_complete', projectId: defaultProjectId, timestamp: new Date().toISOString() }, cli.isJson);
+          const backup = await storage.backupMetadata();
+          printResult({ status: 'metadata_backup_complete', ...backup, timestamp: new Date().toISOString() }, cli.isJson);
         } else {
           printError(`Unknown project subcommand: ${cli.subcommand}`, cli.isJson);
         }
@@ -256,7 +275,9 @@ FLAGS:
             episodeId: epId,
             distinctness,
             canonValidation,
-            isReadyForProduction: distinctness.isDistinct && !canonValidation.violatesHardRules,
+            storyCraft: reviewStoryCraft(episode),
+            isReadyForProduction: false,
+            readinessNotice: 'Automated checks are advisory. Human editorial/rights review and exact-artifact technical QC are required; no approval was created.',
           }, cli.isJson);
         } else if (cli.subcommand === 'approve') {
           const epId = cli.args[0] || (cli.flags.id as string);
@@ -291,7 +312,7 @@ FLAGS:
             id: epId,
             dbId: `ep_${Date.now()}`,
             projectId: defaultProjectId,
-            seriesId: `series_${defaultProjectId}`,
+            seriesId: (await storage.getProject(defaultProjectId))!.activeSeriesId,
             seasonNumber: seasonNum,
             arcNumber: arcNum,
             episodeNumberInArc: 1,
@@ -415,35 +436,7 @@ FLAGS:
           await storage.saveEpisode(defaultProjectId, episode);
           printResult({ episodeId: epId, beatCount: episode.beats.length, newBeat: { beatNumber, name: beatName, snippet } }, cli.isJson);
         } else if (cli.subcommand === 'produce') {
-          const epId = (cli.flags.episode as string) || cli.args[0];
-          const approvalId = (cli.flags['approval-id'] as string);
-          if (!epId) printError('Flag --episode <ID> is required', cli.isJson);
-          if (!approvalId) {
-            printError(
-              'Security Requirement: An authorized, user-issued --approval-id is required for paid runs. Agents cannot self-authorize spend. Run "studio spend authorize --amount <usd>" first.',
-              cli.isJson
-            );
-          }
-
-          const grant = await storage.getSpendGrant(defaultProjectId, approvalId);
-          if (!grant) {
-            printError(`Invalid or unrecognized --approval-id: ${approvalId}. Run "studio spend authorize" to issue a valid grant.`, cli.isJson, 403);
-          }
-          if (grant.isRevoked) {
-            printError(`Spend approval ${approvalId} has been revoked by operator.`, cli.isJson, 403);
-          }
-          if (new Date(grant.expiresAt).getTime() < Date.now()) {
-            printError(`Spend approval ${approvalId} has expired.`, cli.isJson, 403);
-          }
-
-          printResult({
-            status: 'pipeline_queued',
-            episodeId: epId,
-            approvalId,
-            budgetCapUsd: grant.maxBudgetUsd,
-            profile: (cli.flags.profile as string) || 'supervised',
-            message: `Supervised pipeline queued within authorized cap ($${grant.maxBudgetUsd.toFixed(2)} USD). Stopped at human release gates.`,
-          }, cli.isJson);
+          throw new Error('Production execution is not implemented safely; no run was started.');
         } else {
           printError(`Unknown episode subcommand: ${cli.subcommand}`, cli.isJson);
         }
@@ -452,23 +445,16 @@ FLAGS:
 
       case 'arc': {
         if (cli.subcommand === 'expand') {
-          const arcNum = parseInt((cli.flags.arc as string) || cli.args[0] || '1', 10);
-          const count = parseInt((cli.flags.count as string) || '10', 10);
-          if (count > 20) {
-            printError('Hard Cap Violation: Cannot expand more than 20 episode cards per call.', cli.isJson);
-          }
-
-          const arcs = storage.getRoadmapArcs();
-          const arc = arcs.find((a) => a.arcNumber === arcNum);
-          if (!arc) printError(`Arc #${arcNum} not found in 100-arc roadmap`, cli.isJson, 404);
-
-          printResult({
-            arcNumber: arcNum,
-            arcTitle: arc?.arcTitle,
-            cardsExpanded: count,
-            batchLimit: 20,
-            note: 'Arc expansion verified within safety limits.',
-          }, cli.isJson);
+          const integerFlag = (value: unknown, name: string) => {
+            if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) throw new Error(`${name} must be a positive integer`);
+            return Number(value);
+          };
+          const result = await storage.expandArc(defaultProjectId, {
+            arcNumber: integerFlag(cli.flags.arc ?? cli.args[0] ?? '1', 'arc'),
+            count: integerFlag(cli.flags.count ?? '10', 'count'),
+            idempotencyKey: cli.flags['idempotency-key'],
+          });
+          printResult(result, cli.isJson);
         } else {
           printError(`Unknown arc subcommand: ${cli.subcommand}`, cli.isJson);
         }
@@ -522,37 +508,7 @@ FLAGS:
 
       case 'spend': {
         if (cli.subcommand === 'authorize' || cli.subcommand === 'grant') {
-          const amount = parseFloat((cli.flags.amount as string) || cli.args[0] || '25.00');
-          const hours = parseInt((cli.flags.hours as string) || '24', 10);
-          const epId = (cli.flags.episode as string) || 'all';
-          const approvalId = `grant_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
-
-          const grant: SpendApprovalGrant = {
-            approvalId,
-            issuedBy: 'Operator CLI',
-            projectId: defaultProjectId,
-            episodeId: epId,
-            maxBudgetUsd: amount,
-            currency: 'USD',
-            allowedProviders: ['gemini-nano-banana-2.1', 'gemini-omni-1.1-flash', 'chirp-3-hd'],
-            expiresAt,
-            isRevoked: false,
-            actualSpentUsd: 0,
-            createdAt: new Date().toISOString(),
-          };
-
-          await storage.saveSpendGrant(defaultProjectId, grant);
-
-          printResult({
-            approvalId,
-            authorizedAmountUsd: amount,
-            episodeTarget: epId,
-            validForHours: hours,
-            expiresAt,
-            cliUsageExample: `npm run studio -- episode produce --episode S01E001 --approval-id ${approvalId} --json`,
-            note: 'Approval grant recorded. Agents cannot mint or widen this grant.',
-          }, cli.isJson);
+          throw new Error('Spend grant creation is disabled until an operator-only approval service and transactional ledger are implemented.');
         } else if (cli.subcommand === 'list' || !cli.subcommand) {
           const grants = await storage.listSpendGrants(defaultProjectId);
           printResult(grants, cli.isJson);
@@ -562,48 +518,34 @@ FLAGS:
         break;
       }
 
+      case 'media': {
+        if (cli.subcommand === 'enqueue') {
+          const episodeId = cli.flags.episode as string;
+          assertIdentifier(episodeId);
+          if (!(await storage.getEpisode(defaultProjectId, episodeId))) printError('Episode not found', cli.isJson);
+          printResult(localMedia.enqueue({
+            projectId: defaultProjectId, episodeId, frameCount: Number(cli.flags.frames), fps: 24,
+            audioFile: cli.flags.audio as string, idempotencyKey: cli.flags['idempotency-key'] as string,
+          }), cli.isJson);
+        } else if (cli.subcommand === 'work') {
+          printResult(await localMedia.runNext(), cli.isJson);
+        } else if (cli.subcommand === 'recover') {
+          printResult({ interruptedJobs: localMedia.recoverInterrupted() }, cli.isJson);
+        } else if (cli.subcommand === 'status') {
+          printResult(cli.args[0] ? localMedia.get(defaultProjectId, cli.args[0]) : localMedia.list(defaultProjectId), cli.isJson);
+        } else if (cli.subcommand === 'purge-checkpoints') {
+          const id = cli.args[0]; assertIdentifier(id);
+          printResult(await localMedia.purgeCheckpoints(defaultProjectId, id), cli.isJson);
+        } else if (cli.subcommand === 'cancel' || cli.subcommand === 'retry') {
+          const id = cli.args[0]; assertIdentifier(id);
+          printResult(cli.subcommand === 'cancel' ? localMedia.cancel(defaultProjectId, id) : localMedia.retry(defaultProjectId, id), cli.isJson);
+        } else printError('Use media enqueue|work|status|cancel|retry|recover|purge-checkpoints', cli.isJson);
+        break;
+      }
+
       case 'render': {
         if (cli.subcommand === 'script') {
-          const epId = cli.args[0] || (cli.flags.episode as string) || 'S01E001';
-          const episode = await storage.getEpisode(defaultProjectId, epId);
-          if (!episode) printError(`Episode not found: ${epId}`, cli.isJson, 404);
-
-          const scriptBash = `#!/usr/bin/env bash
-# Local FFmpeg Render Script for ${epId} - "${episode.workingTitle}"
-# Generated by Ternfall Studio for Windows/WSL2 & Linux single-operator production
-
-set -euo pipefail
-
-PROD_ROOT="./data/production_root/projects/${defaultProjectId}"
-OUT_DIR="$PROD_ROOT/renders/${epId}"
-mkdir -p "$OUT_DIR"
-
-echo "=== Ternfall Studio: Rendering ${epId} ==="
-command -v ffmpeg >/dev/null 2>&1 || { echo >&2 "[ERROR] ffmpeg is not installed. Install via: sudo apt install ffmpeg"; exit 1; }
-command -v ffprobe >/dev/null 2>&1 || { echo >&2 "[ERROR] ffprobe is not installed."; exit 1; }
-
-# Render master 1080p 24fps MP4 with 16:9 aspect ratio and stereo AAC
-echo "Running FFmpeg composite..."
-ffmpeg -y \\
-  -f lavfi -i color=c=0x0a0f1d:s=1920x1080:r=24 \\
-  -f lavfi -i anullsrc=r=44100:cl=stereo \\
-  -t 15 \\
-  -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p \\
-  -c:a aac -b:a 192k \\
-  -shortest \\
-  "$OUT_DIR/${epId}_composite_1080p.mp4"
-
-echo "=== Render Complete: $OUT_DIR/${epId}_composite_1080p.mp4 ==="
-ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_name -of default=noprint_wrappers=1 "$OUT_DIR/${epId}_composite_1080p.mp4"
-`;
-          if (cli.flags.save) {
-            const outPath = path.resolve(`./render_${epId}.sh`);
-            await fs.promises.writeFile(outPath, scriptBash, 'utf-8');
-            try { fs.chmodSync(outPath, 0o755); } catch {}
-            printResult({ savedTo: outPath, message: `Render script saved to ${outPath}` }, cli.isJson);
-          } else {
-            printResult({ episodeId: epId, script: scriptBash }, cli.isJson);
-          }
+          throw new Error('Legacy placeholder render and stitch scripts are retired. Use media enqueue/work with supplied frames and original audio.');
         } else {
           printError(`Unknown render subcommand: ${cli.subcommand}. Use: studio render script <epId> [--save]`, cli.isJson);
         }
@@ -612,6 +554,7 @@ ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_na
 
       case 'flow': {
         const epId = (cli.flags.episode as string) || cli.args[0] || 'S01E001';
+        assertIdentifier(epId);
 
         if (cli.subcommand === 'plan') {
           const rawMode = (cli.flags.mode as string) || 'dense_24fps';
@@ -622,11 +565,13 @@ ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_na
           const episode = await storage.getEpisode(defaultProjectId, epId);
           const title = episode ? episode.workingTitle : 'Survival Story Episode';
 
-          const plan = createGoogleFlowPlan(epId, title, duration, fps, mode);
+          const plan = createGoogleFlowPlan(epId, title, duration, fps, mode, defaultProjectId);
+          if (cli.flags['expected-revision'] !== undefined) plan.revision = Number(cli.flags['expected-revision']);
           await storage.saveGoogleFlowPlan(defaultProjectId, plan);
 
           printResult({
             episodeId: epId,
+            revision: plan.revision,
             mode: plan.mode,
             durationSeconds: plan.totalDurationSeconds,
             fps: plan.fps,
@@ -639,14 +584,14 @@ ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_na
               account_3: plan.accounts.account_3.batchesAssigned,
             },
             billableApiCostUsd: 0,
-            message: `Google Flow plan created with ${plan.totalBatches} batches of 24 frames distributed across 3 Pro accounts ($0.00 billable cost).`,
+            message: `Plan created with ${plan.totalBatches} batches (up to 24 frames each). Account slots are illustrative and unverified; no provider operation was performed.`,
           }, cli.isJson);
         } else if (cli.subcommand === 'export' || cli.subcommand === 'batch') {
           const batchIndex = parseInt((cli.flags.batch as string) || cli.args[1] || '1', 10);
           let plan = await storage.getGoogleFlowPlan(defaultProjectId, epId);
           if (!plan) {
             const episode = await storage.getEpisode(defaultProjectId, epId);
-            plan = createGoogleFlowPlan(epId, episode ? episode.workingTitle : 'Episode', 600, 24, 'dense_24fps');
+            plan = createGoogleFlowPlan(epId, episode ? episode.workingTitle : 'Episode', 600, 24, 'dense_24fps', defaultProjectId);
             await storage.saveGoogleFlowPlan(defaultProjectId, plan);
           }
 
@@ -691,13 +636,15 @@ ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_na
           printResult({
             episodeId: epId,
             mode: plan.mode,
+            revision: plan.revision,
             totalFramesExpected: plan.totalFramesExpected,
-            totalFramesRendered: renderedCount,
+            unverifiedImageFilesPresent: renderedCount,
+            verifiedFrames: plan.summary.totalFramesIngested,
             totalBatches: plan.totalBatches,
             pendingBatches: plan.batches.filter((b) => b.status === 'pending').length,
             dispatchedBatches: plan.batches.filter((b) => b.status === 'dispatched').length,
             ingestedBatches: plan.batches.filter((b) => b.status === 'ingested' || b.status === 'verified').length,
-            completionPercentage: Math.min(100, Math.round((renderedCount / plan.totalFramesExpected) * 100)),
+            completionPercentage: plan.summary.completionPercentage,
             billableCostUsd: 0,
             accountBreakdown: {
               account_1: { label: plan.accounts.account_1.label, assigned: plan.accounts.account_1.batchesAssigned, completed: plan.accounts.account_1.batchesCompleted },
@@ -706,71 +653,20 @@ ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_na
             },
           }, cli.isJson);
         } else if (cli.subcommand === 'ingest') {
-          const batchIndex = parseInt((cli.flags.batch as string) || cli.args[1] || '1', 10);
-          let plan = await storage.getGoogleFlowPlan(defaultProjectId, epId);
-          if (!plan) {
-            const episode = await storage.getEpisode(defaultProjectId, epId);
-            plan = createGoogleFlowPlan(epId, episode ? episode.workingTitle : 'Episode', 600, 24, 'dense_24fps');
-          }
-
-          const batch = plan.batches.find((b) => b.batchIndex === batchIndex);
-          if (!batch) printError(`Batch index ${batchIndex} not found in plan for ${epId}`, cli.isJson, 404);
-
-          const outDir = path.resolve(process.cwd(), 'data', 'production_root', 'projects', defaultProjectId, 'assets', 'flow_renders', epId);
-          await fs.promises.mkdir(outDir, { recursive: true });
-
-          const baseFrameNum = (batch.batchIndex - 1) * 24;
-          const generatedFiles: string[] = [];
-
-          // Generate/verify 24 frames
-          for (let i = 1; i <= 24; i++) {
-            const frameNum = baseFrameNum + i;
-            const frameFileName = `frame_${String(frameNum).padStart(5, '0')}.png`;
-            const framePath = path.join(outDir, frameFileName);
-            if (!fs.existsSync(framePath)) {
-              const minimalPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64');
-              await fs.promises.writeFile(framePath, minimalPng);
-            }
-            generatedFiles.push(frameFileName);
-          }
-
-          const validation = validateBatchIngestion(batch, generatedFiles);
-          batch.ingestedFiles = validation.normalizedFiles;
-          batch.ingestedFrameCount = validation.ingestedCount;
-          batch.missingFrames = validation.missingFrames;
-          batch.status = 'verified';
-          batch.ingestedAt = new Date().toISOString();
-          plan.accounts[batch.assignedAccount].batchesCompleted++;
-
-          await storage.saveGoogleFlowPlan(defaultProjectId, plan);
-
-          printResult({
-            batchId: batch.batchId,
-            batchIndex: batch.batchIndex,
-            account: batch.assignedAccount,
-            framesIngested: validation.ingestedCount,
-            status: 'verified',
-            outputDir: outDir,
-            message: `Batch ${batchIndex} (24 frames) successfully ingested into timeline frames ${baseFrameNum + 1}..${baseFrameNum + 24}.`,
-          }, cli.isJson);
+          const plan = await storage.getGoogleFlowPlan(defaultProjectId, epId);
+          if (!plan) printError('Create a plan before verifying a batch', cli.isJson);
+          const index = Number(cli.flags.batch ?? cli.args[1] ?? 1);
+          const batch = plan!.batches.find(item => item.batchIndex === index);
+          if (!batch) printError('Batch not found', cli.isJson);
+          const revision = cli.flags['expected-revision'] === undefined ? plan!.revision : Number(cli.flags['expected-revision']);
+          printResult(await verifyFlowBatch(storage, defaultProjectId, epId, batch!.batchId, revision), cli.isJson);
         } else if (cli.subcommand === 'stitch') {
-          const fps = parseInt((cli.flags.fps as string) || '24', 10);
-          const audioPath = (cli.flags.audio as string) || '';
-          const scriptBash = generateFfmpeg24fpsStitchScript(defaultProjectId, epId, fps, audioPath);
-
-          if (cli.flags.save) {
-            const outPath = path.resolve(process.cwd(), `render_flow_${epId}_24fps.sh`);
-            await fs.promises.writeFile(outPath, scriptBash, 'utf-8');
-            try { fs.chmodSync(outPath, 0o755); } catch {}
-            printResult({ savedTo: outPath, message: `24fps FFmpeg stitch script saved to ${outPath}` }, cli.isJson);
-          } else {
-            printResult({ episodeId: epId, script: scriptBash }, cli.isJson);
-          }
+          printError('Legacy stitch scripts are retired. Use the verified local renderer with supplied frames and original audio. No script was written.', cli.isJson);
         } else if (cli.subcommand === 'checkpoint') {
           let plan = await storage.getGoogleFlowPlan(defaultProjectId, epId);
           if (!plan) {
             const episode = await storage.getEpisode(defaultProjectId, epId);
-            plan = createGoogleFlowPlan(epId, episode ? episode.workingTitle : 'Episode', 600, 24, 'dense_24fps');
+            plan = createGoogleFlowPlan(epId, episode ? episode.workingTitle : 'Episode', 600, 24, 'dense_24fps', defaultProjectId);
           }
           const checkpoint = computeFlowCheckpoint(plan);
           printResult(checkpoint, cli.isJson);
@@ -841,10 +737,10 @@ SAFE WORKFLOW COMMANDS (all use typed CLI):
             claimText,
             isFictionalLore: Boolean(cli.flags.fictional),
             sourceUrl: url,
-            verificationStatus: cli.flags.fictional ? 'fictional_rule' : 'verified',
-            confidenceScore: 0.9,
-            factCheckerNotes: 'Recorded via safe CLI',
-            humanApproved: true,
+            verificationStatus: cli.flags.fictional ? 'fictional_rule' : 'unverified',
+            confidenceScore: 0,
+            factCheckerNotes: 'Recorded via CLI; pending independent review',
+            humanApproved: false,
             relatedEpisodeIds: [],
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -887,7 +783,7 @@ SAFE WORKFLOW COMMANDS (all use typed CLI):
         if (cli.subcommand === 'preflight') {
           printResult({
             packageCount: pkgs.length,
-            status: 'preflight_complete',
+            status: 'checklist_only_unverified',
             mandatoryChecks: [
               '1. Technical QC valid',
               '2. Claims and lore checked',

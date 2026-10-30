@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ResearchClaim } from '../types/index.ts';
 import {
   Search,
@@ -18,6 +18,10 @@ interface ResearchRoomViewProps {
 export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId }) => {
   const [claims, setClaims] = useState<ResearchClaim[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const generation = useRef(0);
+  const urlRequest = useRef(0);
   const [isCreating, setIsCreating] = useState(false);
   const [claimText, setClaimText] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
@@ -31,23 +35,25 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
     warnings?: string[];
   }>({ tested: false });
 
-  const loadClaims = async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/research`);
-      const data = await res.json();
-      if (data.ok) setClaims(data.data);
-    } catch (err) {
-      console.error('Failed to load claims:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadClaims();
+    const controller = new AbortController();
+    generation.current++; urlRequest.current++;
+    setClaims([]); setLoading(true); setError(''); setSaving(false); setIsCreating(false);
+    setClaimText(''); setSourceUrl(''); setSourceTitle(''); setEvidenceExcerpt(''); setIsFictional(false); setUrlValidation({ tested: false });
+    void (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/research`, { signal: controller.signal });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not load research notes');
+        if (!controller.signal.aborted) setClaims(data.data);
+      } catch (err: any) { if (!controller.signal.aborted) setError(err.message); }
+      finally { if (!controller.signal.aborted) setLoading(false); }
+    })();
+    return () => { generation.current++; urlRequest.current++; controller.abort(); };
   }, [projectId]);
 
   const handleTestUrl = async (url: string) => {
+    const current = ++urlRequest.current;
     if (!url) {
       setUrlValidation({ tested: false });
       return;
@@ -59,6 +65,8 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
         body: JSON.stringify({ url }),
       });
       const data = await res.json();
+      if (current !== urlRequest.current) return;
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Could not validate URL syntax');
       if (data.ok) {
         setUrlValidation({
           tested: true,
@@ -67,14 +75,16 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
           warnings: data.data.warnings,
         });
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      if (current === urlRequest.current) setError(err.message);
     }
   };
 
   const handleCreateClaim = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!claimText) return;
+    if (!claimText.trim() || saving) return;
+    const current = generation.current;
+    setSaving(true); setError('');
 
     try {
       const res = await fetch(`/api/projects/${projectId}/research`, {
@@ -86,26 +96,27 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
           sourceUrl: isFictional ? undefined : sourceUrl,
           sourceTitle: isFictional ? undefined : sourceTitle,
           evidenceExcerpt: isFictional ? undefined : evidenceExcerpt,
-          verificationStatus: isFictional ? 'fictional_rule' : 'verified',
-          confidenceScore: 0.95,
-          humanApproved: true,
+          verificationStatus: isFictional ? 'fictional_rule' : 'unverified',
+          confidenceScore: 0,
+          humanApproved: false,
         }),
       });
       const data = await res.json();
+      if (current !== generation.current) return;
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Could not save research note');
       if (data.ok) {
+        setClaims(previous => [...previous.filter(claim => claim.id !== data.data.id), data.data]);
         setIsCreating(false);
         setClaimText('');
         setSourceUrl('');
         setSourceTitle('');
         setEvidenceExcerpt('');
         setUrlValidation({ tested: false });
-        loadClaims();
-      } else {
-        alert(data.error);
+
       }
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
-    }
+      if (current === generation.current) setError(`${err.message} Your draft is retained.`);
+    } finally { if (current === generation.current) setSaving(false); }
   };
 
   return (
@@ -121,11 +132,12 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
               Research Room & Fact Ledger
             </h1>
             <p className="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
-              Strictly separate real-world engineering facts from invented story-world rules. No fabricated citations, no real-world emergency advice, and automated SSRF / prompt injection defense on untrusted web citations.
+              Strictly separate real-world engineering facts from invented story-world rules. No fabricated citations or real-world emergency advice. URL and text checks are advisory. Saving a note does not verify it or approve narration inclusion.
             </p>
           </div>
 
           <button
+            disabled={loading}
             onClick={() => setIsCreating(true)}
             className="px-3.5 py-1.5 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 shadow-sm transition-colors shrink-0"
           >
@@ -143,7 +155,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
             <span>SSRF & Loopback Shield</span>
           </div>
           <p className="text-slate-400 text-[11px]">
-            Blocks 127.0.0.1, localhost, link-local metadata (169.254.x.x), and private ranges from being queried as research URLs.
+            Checks URL syntax and rejects known local/private literal targets. No source is fetched; DNS and redirects are not checked. This is not a network-fetch safety guarantee.
           </p>
         </div>
 
@@ -153,7 +165,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
             <span>Prompt Injection Defense</span>
           </div>
           <p className="text-slate-400 text-[11px]">
-            Scans untrusted web extracts for prompt overrides, jailbreaks, and instructions before including in story context.
+            Flags known instruction patterns in bounded note fields. Pattern matching is advisory, not complete injection protection; notes never authorize tools or approvals.
           </p>
         </div>
 
@@ -163,14 +175,16 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
             <span>Human Fact-Check Gate</span>
           </div>
           <p className="text-slate-400 text-[11px]">
-            An LLM-generated URL is never marked verified automatically; human sign-off is required before narration inclusion.
+            All real-world notes remain unverified. Historical approval labels are not trusted; a durable independent review workflow is not implemented yet.
           </p>
         </div>
       </div>
 
+      {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
+      {!loading && claims.length === 0 && <p className="text-sm text-slate-400">No research notes recorded.</p>}
       {/* Claims List */}
       {loading ? (
-        <div className="p-8 text-center text-xs text-slate-500">Loading verified claims...</div>
+        <div className="p-8 text-center text-xs text-slate-500">Loading research notes...</div>
       ) : (
         <div className="space-y-3">
           {claims.map((claim) => (
@@ -188,10 +202,10 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
                       : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                   }`}
                 >
-                  {claim.isFictionalLore ? 'Fictional Lore' : `Real Fact (${claim.verificationStatus})`}
+                  {claim.isFictionalLore ? 'Fictional Lore' : `Source Note (${claim.verificationStatus})`}
                 </span>
                 <span className="text-[11px] text-slate-500 font-mono">
-                  Access Date: {claim.accessDate || '2026-10-29'}
+                  Access Date: {claim.accessDate || 'not recorded'}
                 </span>
               </div>
 
@@ -238,8 +252,10 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
             className="bg-slate-900 border border-slate-800 rounded-lg max-w-lg w-full p-6 space-y-4 shadow-xl text-xs"
           >
             <h3 className="text-base font-bold text-slate-100">
-              Add Verified Research Claim
+              Add Unreviewed Research Note
             </h3>
+            {error && <p role="alert" className="text-rose-300">{error}</p>}
+            <fieldset disabled={saving} className="space-y-4">
 
             <div className="space-y-3">
               <div className="flex items-center gap-2 p-2 rounded bg-slate-950 border border-slate-800">
@@ -262,6 +278,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
                 <textarea
                   required
                   rows={2}
+                  maxLength={10000}
                   value={claimText}
                   onChange={(e) => setClaimText(e.target.value)}
                   placeholder="e.g. Backflow preventers stop reverse siphonage during sudden main shutoffs..."
@@ -277,6 +294,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
                     </label>
                     <input
                       type="text"
+                      maxLength={1000}
                       value={sourceTitle}
                       onChange={(e) => setSourceTitle(e.target.value)}
                       placeholder="e.g. Water Distribution Systems Handbook"
@@ -292,14 +310,15 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
                         onClick={() => handleTestUrl(sourceUrl)}
                         className="text-teal-400 hover:text-teal-300 text-[11px]"
                       >
-                        Verify URL & SSRF
+                        Check URL Syntax
                       </button>
                     </div>
                     <input
                       type="url"
+                      maxLength={2048}
                       value={sourceUrl}
                       onChange={(e) => {
-                        setSourceUrl(e.target.value);
+                        urlRequest.current++; setSourceUrl(e.target.value);
                         setUrlValidation({ tested: false });
                       }}
                       placeholder="https://..."
@@ -315,7 +334,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
                         }`}
                       >
                         {urlValidation.valid
-                          ? '✓ Valid external HTTPS URL. Passed SSRF checks.'
+                          ? '✓ URL syntax accepted. Source not fetched or verified.'
                           : `✕ Blocked: ${urlValidation.warnings?.join(', ')}`}
                       </div>
                     )}
@@ -327,6 +346,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
                     </label>
                     <textarea
                       rows={2}
+                      maxLength={30000}
                       value={evidenceExcerpt}
                       onChange={(e) => setEvidenceExcerpt(e.target.value)}
                       placeholder="Direct quote supporting this specific fact..."
@@ -340,7 +360,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
               <button
                 type="button"
-                onClick={() => setIsCreating(false)}
+                onClick={() => { urlRequest.current++; setIsCreating(false); }}
                 className="px-3 py-1.5 text-slate-400 hover:text-slate-200"
               >
                 Cancel
@@ -352,6 +372,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
                 Add Claim
               </button>
             </div>
+            </fieldset>
           </form>
         </div>
       )}

@@ -1,3 +1,4 @@
+import { LocalRenderPanel } from './LocalRenderPanel.tsx';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   GoogleFlowPlan,
@@ -88,6 +89,7 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
 
   // Plan & Math State
   const [plan, setPlan] = useState<GoogleFlowPlan | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [productionStrategy, setProductionStrategy] = useState<'sustainable_hybrid' | 'high_veo' | 'conservative'>('sustainable_hybrid');
@@ -99,27 +101,13 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
   const [ingestSuccessMessage, setIngestSuccessMessage] = useState<string | null>(null);
 
   // Technical Pipeline Sub-tabs
-  const [pipelineSubTab, setPipelineSubTab] = useState<'batches' | 'autoworker' | 'audio' | 'render_scripts' | 'physics'>('batches');
+  const [pipelineSubTab, setPipelineSubTab] = useState<'batches' | 'physics'>('batches');
   const [physicsSimMode, setPhysicsSimMode] = useState<'flicker' | 'parallax' | 'veo'>('parallax');
 
-  // Auto-worker state
-  const [autoWorkerScript, setAutoWorkerScript] = useState<string | null>(null);
-  const [autoWorkerCmd, setAutoWorkerCmd] = useState<string | null>(null);
-  const [copiedWorkerScript, setCopiedWorkerScript] = useState(false);
-  const [loadingWorker, setLoadingWorker] = useState(false);
-
-  // Audio mix state
-  const [audioScript, setAudioScript] = useState<string | null>(null);
-  const [audioRunCmd, setAudioRunCmd] = useState<string | null>(null);
-  const [copiedAudioScript, setCopiedAudioScript] = useState(false);
-  const [loadingAudio, setLoadingAudio] = useState(false);
+  // Local preview state
   const [audioPreviewPlaying, setAudioPreviewPlaying] = useState(false);
 
-  // Master render & YouTube package state
-  const [renderScript, setRenderScript] = useState<string | null>(null);
-  const [renderRunCmd, setRenderRunCmd] = useState<string | null>(null);
-  const [copiedRenderScript, setCopiedRenderScript] = useState(false);
-  const [loadingRender, setLoadingRender] = useState(false);
+  // Draft YouTube metadata state
   const [youtubePackage, setYoutubePackage] = useState<any | null>(null);
   const [copiedYtSection, setCopiedYtSection] = useState<string | null>(null);
 
@@ -196,13 +184,17 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
   const fetchPlan = async () => {
     try {
       setLoading(true);
+      setPlan(null);
+      setPlanError(null);
       const res = await fetch(`/api/projects/${projectId}/flow/plan/${episodeId}`);
       const data = await res.json();
+      if (res.status === 404) { setPlanError('No prepared plan. Choose a target duration below to create one explicitly.'); return; }
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Planning request failed');
       if (data.ok && data.data) {
         setPlan(data.data);
       }
     } catch (err) {
-      console.error('Failed to load Google Flow plan:', err);
+      setPlanError(err instanceof Error ? err.message : 'Failed to load plan');
     } finally {
       setLoading(false);
     }
@@ -235,68 +227,15 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
     }
   };
 
-  const loadAutoWorker = async () => {
-    try {
-      setLoadingWorker(true);
-      const res = await fetch(`/api/projects/${projectId}/flow/autoworker/${episodeId}`);
-      const data = await res.json();
-      if (data.ok && data.data) {
-        setAutoWorkerScript(data.data.script);
-        setAutoWorkerCmd(data.data.runCommand);
-      }
-    } catch (err) {
-      console.error('Failed to load auto-worker:', err);
-    } finally {
-      setLoadingWorker(false);
-    }
-  };
-
-  const loadAudioGenerator = async () => {
-    try {
-      setLoadingAudio(true);
-      const res = await fetch(`/api/projects/${projectId}/flow/generate-audio/${episodeId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ durationSeconds: durationMinutes * 60 }),
-      });
-      const data = await res.json();
-      if (data.ok && data.data) {
-        setAudioScript(data.data.script);
-        setAudioRunCmd(data.data.runCommand);
-      }
-    } catch (err) {
-      console.error('Failed to generate audio mix script:', err);
-    } finally {
-      setLoadingAudio(false);
-    }
-  };
-
+  // Draft metadata only: no script preparation or production execution.
   const loadMasterRenderAndYouTube = async () => {
+    setYoutubePackage(null);
     try {
-      setLoadingRender(true);
-      const [renderRes, ytRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}/flow/master-render/${episodeId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fps: 24 }),
-        }),
-        fetch(`/api/projects/${projectId}/flow/youtube-package/${episodeId}`),
-      ]);
-
-      const renderData = await renderRes.json();
-      const ytData = await ytRes.json();
-
-      if (renderData.ok && renderData.data) {
-        setRenderScript(renderData.data.script);
-        setRenderRunCmd(renderData.data.runCommand);
-      }
-      if (ytData.ok && ytData.data) {
-        setYoutubePackage(ytData.data);
-      }
+      const response = await fetch(`/api/projects/${projectId}/flow/youtube-package/${episodeId}`);
+      const result = await response.json();
+      if (response.ok && result.ok) setYoutubePackage(result.data);
     } catch (err) {
-      console.error('Failed to load master render and YouTube package:', err);
-    } finally {
-      setLoadingRender(false);
+      console.error('Failed to load draft metadata:', err);
     }
   };
 
@@ -306,30 +245,11 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
     loadMasterRenderAndYouTube();
   }, [projectId, episodeId]);
 
-  useEffect(() => {
-    if (pipelineSubTab === 'autoworker') loadAutoWorker();
-    if (pipelineSubTab === 'audio') loadAudioGenerator();
-    if (pipelineSubTab === 'render_scripts') loadMasterRenderAndYouTube();
-  }, [pipelineSubTab, episodeId, durationMinutes]);
 
   // Single-Click "Autoproduce Full Master"
   const handleRunFullAutoproduce = async () => {
     try {
       setIsAutoproducing(true);
-      setAutoproduceStep(1); // Stage 1: Batch Plan Check
-      await new Promise((r) => setTimeout(r, 600));
-
-      setAutoproduceStep(2); // Stage 2: 3-Account Checkpoint Verification
-      await new Promise((r) => setTimeout(r, 800));
-
-      setAutoproduceStep(3); // Stage 3: Local Audio & 8-Beat Pulse Synthesize
-      await new Promise((r) => setTimeout(r, 700));
-
-      setAutoproduceStep(4); // Stage 4: 1080p 24fps Master Stitch & 9:16 Shorts Cut
-      await new Promise((r) => setTimeout(r, 900));
-
-      setAutoproduceStep(5); // Stage 5: YouTube Package Assembly
-
       const res = await fetch(`/api/projects/${projectId}/flow/autoproduce/${episodeId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -384,11 +304,13 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
       shortVideo: `./data/production_root/projects/${projectId}/renders/${episodeId}_youtube_short_9x16.mp4`,
       audioMaster: `./data/production_root/projects/${projectId}/audio/${episodeId}/${episodeId}_master_audio_mix_14lufs.wav`,
       metadata: youtubePackage,
+      status: 'planned_unverified',
       qcReport: {
+        measured: false,
         resolution: '1920x1080',
         fps: 24.0,
-        loudnessLufs: -14.0,
-        truePeakCeilingDb: -1.0,
+        loudnessLufs: null,
+        truePeakCeilingDb: null,
         codec: 'h264_high / aac_stereo_384k',
         syntheticMediaDisclosed: true,
       },
@@ -904,7 +826,7 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
           </h1>
 
           <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
-            AI-directed survival thriller episode. Google Flow synthesizes all 14,400 cinematic frames across 3 load-balanced Pro accounts, local procedural audio renders the 55Hz sub-bass score at -14.0 LUFS, and the system delivers ready-to-publish assets.
+            Plan an original survival thriller episode. Scripts and metadata are preparation tools, not evidence of completed media or verified quality.
           </p>
         </div>
 
@@ -952,48 +874,21 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
             className="px-4 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-400 hover:to-emerald-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-teal-950/50 transition-all disabled:opacity-50"
           >
             <Zap className={`w-4 h-4 ${isAutoproducing ? 'animate-spin' : 'text-amber-300'}`} />
-            <span>{isAutoproducing ? 'Producing Master...' : '⚡ 1-Click Autoproduce'}</span>
+            <span>{isAutoproducing ? 'Preparing plan...' : 'Prepare Production Plan'}</span>
           </button>
         </div>
       </div>
 
-      {/* Autoproduce Progress HUD Overlay */}
-      {isAutoproducing && (
-        <div className="p-4 rounded-xl bg-teal-950/40 border border-teal-500/40 space-y-3">
-          <div className="flex items-center justify-between text-xs font-semibold text-teal-300">
-            <span className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-amber-400 animate-bounce" />
-              Automated Single-Click Pipeline in Progress
-            </span>
-            <span className="font-mono text-teal-400">Stage {autoproduceStep} of 5</span>
-          </div>
+      <div role="status" className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/30 text-sm text-amber-200">
+        Flow automation is planning-only. Use the Local Render panel for real file validation, rendering and measured technical QC. Visual generation, account telemetry and paid execution remain unavailable.
+        {isAutoproducing && <p>Preparing production plan…</p>}
+        {autoproduceResult && <p>{autoproduceResult.message}</p>}
+      </div>
 
-          <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden">
-            <div
-              className="bg-gradient-to-r from-teal-500 to-emerald-400 h-full rounded-full transition-all duration-500"
-              style={{ width: `${(autoproduceStep / 5) * 100}%` }}
-            />
-          </div>
-
-          <div className="grid grid-cols-5 gap-2 text-[11px] font-mono">
-            <div className={`p-1.5 rounded ${autoproduceStep >= 1 ? 'bg-teal-500/20 text-teal-300' : 'text-slate-500'}`}>
-              1. 600 Batches Planned
-            </div>
-            <div className={`p-1.5 rounded ${autoproduceStep >= 2 ? 'bg-teal-500/20 text-teal-300' : 'text-slate-500'}`}>
-              2. 3-Account Ingest Check
-            </div>
-            <div className={`p-1.5 rounded ${autoproduceStep >= 3 ? 'bg-teal-500/20 text-teal-300' : 'text-slate-500'}`}>
-              3. Procedural Audio Mix
-            </div>
-            <div className={`p-1.5 rounded ${autoproduceStep >= 4 ? 'bg-teal-500/20 text-teal-300' : 'text-slate-500'}`}>
-              4. 24fps Master & Short
-            </div>
-            <div className={`p-1.5 rounded ${autoproduceStep >= 5 ? 'bg-teal-500/20 text-teal-300' : 'text-slate-500'}`}>
-              5. YouTube Package Ready
-            </div>
-          </div>
-        </div>
-      )}
+      {planError && <div role="alert" className="p-3 rounded border border-rose-700 text-rose-200 text-sm">
+        {planError} <button className="underline ml-2" onClick={() => { setPlanError(null); void fetchPlan(); }}>Reload current plan</button>
+      </div>}
+      <LocalRenderPanel projectId={projectId} episodeId={episodeId} />
 
       {/* =========================================================================
           3-ACCOUNT GOOGLE FLOW CREDIT ECONOMICS & SUSTAINABILITY COMMAND CENTER
@@ -1773,41 +1668,8 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
               <span>1. 24-Frame Batches ({plan?.totalBatches || 600})</span>
             </button>
 
-            <button
-              onClick={() => setPipelineSubTab('autoworker')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
-                pipelineSubTab === 'autoworker'
-                  ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-              }`}
-            >
-              <Zap className="w-4 h-4" />
-              <span>2. Headless Auto-Worker (3 Accounts)</span>
-            </button>
 
-            <button
-              onClick={() => setPipelineSubTab('audio')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
-                pipelineSubTab === 'audio'
-                  ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-              }`}
-            >
-              <Volume2 className="w-4 h-4" />
-              <span>3. Local Audio & 8-Beat Pulse Studio</span>
-            </button>
 
-            <button
-              onClick={() => setPipelineSubTab('render_scripts')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
-                pipelineSubTab === 'render_scripts'
-                  ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-              }`}
-            >
-              <Terminal className="w-4 h-4" />
-              <span>4. Technical QC & Storage</span>
-            </button>
 
             <button
               onClick={() => setPipelineSubTab('physics')}
@@ -1833,23 +1695,26 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
                       <button
                         key={mins}
                         onClick={async () => {
-                          setDurationMinutes(mins);
+                          if (plan?.summary.verifiedBatches && !window.confirm('Reset this plan and clear its saved batch evidence? Source files will be kept.')) return;
+                          setPlanError(null);
                           try {
                             setLoading(true);
                             const durationSeconds = mins * 60;
                             const res = await fetch(`/api/projects/${projectId}/flow/plan/${episodeId}`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ durationSeconds, fps: 24, mode: 'dense_24fps' }),
+                              body: JSON.stringify({ durationSeconds, fps: 24, mode: 'dense_24fps', expectedRevision: plan?.revision ?? 0 }),
                             });
                             const data = await res.json();
+                            if (!res.ok || !data.ok) throw new Error(data.error || 'Could not replace plan');
                             if (data.ok && data.data) {
+                              setDurationMinutes(mins);
                               setPlan(data.data);
                               setSelectedBatchIndex(1);
                               fetchStorageStats();
                             }
                           } catch (err) {
-                            console.error('Failed to update plan:', err);
+                            setPlanError(err instanceof Error ? err.message : 'Failed to replace plan');
                           } finally {
                             setLoading(false);
                           }
@@ -1944,7 +1809,7 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
                           </span>
                         </div>
                         <div className="text-xs text-slate-400 mt-0.5">
-                          Timecode: {activeBatch.timecodeRange?.start} - {activeBatch.timecodeRange?.end} • Frames {(activeBatch.batchIndex - 1) * 24 + 1} to {activeBatch.batchIndex * 24} (24 Frames)
+                          Timecode: {activeBatch.timecodeRange?.start} - {activeBatch.timecodeRange?.end} • Frames {(activeBatch.batchIndex - 1) * 24 + 1} to {(activeBatch.batchIndex - 1) * 24 + activeBatch.framesExpected} ({activeBatch.framesExpected} Frames)
                         </div>
                       </div>
 
@@ -1957,16 +1822,19 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
                               const res = await fetch(`/api/projects/${projectId}/flow/ingest`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ episodeId, batchId: activeBatch.batchId, simulate: true }),
+                                body: JSON.stringify({ episodeId, batchId: activeBatch.batchId, expectedRevision: plan?.revision ?? 0 }),
                               });
                               const data = await res.json();
+                              if (!res.ok || !data.ok) throw new Error(data.error || 'Frame verification failed');
                               if (data.ok) {
-                                setIngestSuccessMessage(`Successfully ingested 24 frames for batch ${activeBatch.batchId}!`);
+                                setPlanError(null);
+                                setIngestSuccessMessage(`Decoded and hash-verified ${data.data.batch.ingestedFrameCount} existing frames for ${activeBatch.batchId}.`);
                                 await fetchPlan();
                                 fetchStorageStats();
                               }
                             } catch (err) {
-                              console.error('Failed to ingest batch:', err);
+                              await fetchPlan();
+                              setPlanError(err instanceof Error ? err.message : 'Frame verification failed');
                             } finally {
                               setIngesting(false);
                             }
@@ -1975,7 +1843,7 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
                           className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center gap-1.5 transition-colors disabled:opacity-50"
                         >
                           <FileCheck className="w-3.5 h-3.5" />
-                          <span>{ingesting ? 'Ingesting...' : 'Simulate Ingest 24 Frames'}</span>
+                          <span>{ingesting ? 'Ingesting...' : `Verify ${activeBatch.framesExpected} Existing Frames`}</span>
                         </button>
                       </div>
                     </div>
@@ -2040,188 +1908,9 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
             </div>
           )}
 
-          {/* SUB-TAB 2: Headless Auto-Worker */}
-          {pipelineSubTab === 'autoworker' && (
-            <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div>
-                  <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-teal-400" />
-                    <span>Headless Auto-Worker Generator (3 Pro Accounts)</span>
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Generates Playwright/Puppeteer script to automatically queue batches on flow.google.com with zero billable spend.
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => {
-                    if (autoWorkerScript) {
-                      navigator.clipboard.writeText(autoWorkerScript);
-                      setCopiedWorkerScript(true);
-                      setTimeout(() => setCopiedWorkerScript(false), 2000);
-                    }
-                  }}
-                  className="px-3.5 py-1.5 rounded bg-teal-600 hover:bg-teal-500 text-white font-medium text-xs flex items-center gap-1.5 transition-colors"
-                >
-                  {copiedWorkerScript ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedWorkerScript ? 'Copied Script' : 'Copy Worker Script'}</span>
-                </button>
-              </div>
-
-              {autoWorkerCmd && (
-                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="text-[11px] font-mono text-slate-400">CLI Launch Command:</div>
-                  <code className="text-xs font-mono text-teal-300 block">{autoWorkerCmd}</code>
-                </div>
-              )}
-
-              <textarea
-                readOnly
-                rows={14}
-                value={autoWorkerScript || 'Loading automated worker script...'}
-                className="w-full p-3 bg-slate-950 border border-slate-800 rounded font-mono text-xs text-slate-200 leading-relaxed resize-none focus:outline-none"
-              />
-            </div>
-          )}
-
-          {/* SUB-TAB 3: Local Audio & 8-Beat Pulse Studio */}
-          {pipelineSubTab === 'audio' && (
-            <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div>
-                  <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Volume2 className="w-4 h-4 text-teal-400" />
-                    <span>Local Audio Engine & 8-Beat Pulse Mix Generator</span>
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Synthesizes 55Hz sub-bass signature pulse, rain foley, and dialogue stems mastered to -14.0 LUFS.
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => {
-                    if (audioScript) {
-                      navigator.clipboard.writeText(audioScript);
-                      setCopiedAudioScript(true);
-                      setTimeout(() => setCopiedAudioScript(false), 2000);
-                    }
-                  }}
-                  className="px-3.5 py-1.5 rounded bg-teal-600 hover:bg-teal-500 text-white font-medium text-xs flex items-center gap-1.5 transition-colors"
-                >
-                  {copiedAudioScript ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedAudioScript ? 'Copied Script' : 'Copy Audio Script'}</span>
-                </button>
-              </div>
-
-              {audioRunCmd && (
-                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                  <div className="text-[11px] font-mono text-slate-400">CLI Audio Generation Command:</div>
-                  <code className="text-xs font-mono text-teal-300 block">{audioRunCmd}</code>
-                </div>
-              )}
-
-              <textarea
-                readOnly
-                rows={14}
-                value={audioScript || 'Generating audio synthesis script...'}
-                className="w-full p-3 bg-slate-950 border border-slate-800 rounded font-mono text-xs text-slate-200 leading-relaxed resize-none focus:outline-none"
-              />
-            </div>
-          )}
-
-          {/* SUB-TAB 4: Technical QC & Disk Manager */}
-          {pipelineSubTab === 'render_scripts' && (
-            <div className="space-y-6">
-              {/* Technical QC Card */}
-              <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                    <span className="text-sm font-bold text-white">YouTube Pre-Flight Technical Quality Control (QC)</span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-bold">
-                    ALL SPECIFICATIONS PASSED
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80">
-                    <div className="text-xs text-slate-400">Master Resolution:</div>
-                    <div className="text-sm font-bold text-emerald-400 font-mono mt-0.5">1920x1080 (16:9)</div>
-                    <div className="text-[10px] text-slate-500">H.264 High@L4.1 CRF 17</div>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80">
-                    <div className="text-xs text-slate-400">Frame Rate Compliance:</div>
-                    <div className="text-sm font-bold text-emerald-400 font-mono mt-0.5">24.000 FPS Constant</div>
-                    <div className="text-[10px] text-slate-500">Zero dropped frames across 14,400</div>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80">
-                    <div className="text-xs text-slate-400">Integrated Loudness:</div>
-                    <div className="text-sm font-bold text-emerald-400 font-mono mt-0.5">-14.0 LUFS ±0.2</div>
-                    <div className="text-[10px] text-slate-500">EBU R128 YouTube broadcast spec</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Local Storage & Disk Cleanup Manager */}
-              <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center gap-2">
-                    <HardDrive className="w-5 h-5 text-teal-400" />
-                    <span className="text-sm font-bold text-white">Local Storage & Render Disk Manager</span>
-                  </div>
-                  <button
-                    onClick={handleCleanCache}
-                    disabled={cleaningCache}
-                    className="px-3 py-1.5 rounded bg-slate-800 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-700/50 text-slate-200 hover:text-rose-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>{cleaningCache ? 'Cleaning...' : 'Clean Scratch Cache'}</span>
-                  </button>
-                </div>
-
-                {cacheCleanedMessage && (
-                  <div className="p-3 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    <span>{cacheCleanedMessage}</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80">
-                    <div className="text-[11px] text-slate-500 font-mono">14,400 PNG Frames</div>
-                    <div className="text-base font-bold font-mono text-white mt-0.5">
-                      {storageStats ? `${storageStats.frameSizeMb} MB` : '8,640 MB'}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80">
-                    <div className="text-[11px] text-slate-500 font-mono">Audio Stems</div>
-                    <div className="text-base font-bold font-mono text-white mt-0.5">
-                      {storageStats ? `${storageStats.audioStemsMb} MB` : '480 MB'}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80">
-                    <div className="text-[11px] text-slate-500 font-mono">1080p Master Video</div>
-                    <div className="text-base font-bold font-mono text-white mt-0.5">
-                      {storageStats ? `${storageStats.masterVideoMb} MB` : '1,420 MB'}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80">
-                    <div className="text-[11px] text-slate-500 font-mono">9:16 Shorts Cut</div>
-                    <div className="text-base font-bold font-mono text-white mt-0.5">
-                      {storageStats ? `${storageStats.shortVideoMb} MB` : '180 MB'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          <p className="text-xs text-amber-300 p-3">
+            Legacy worker, procedural-audio and master-script exports are retired. Use the local renderer above with supplied frames and original audio. Draft metadata is not measured QC or publication approval.
+          </p>
 
           {/* SUB-TAB 5: AI Video Physics & Zero-Credit Reality */}
           {pipelineSubTab === 'physics' && (
@@ -2513,7 +2202,7 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-white">Google Flow Accounts Live Health & Ping</h3>
-                  <p className="text-xs text-slate-400">3 Verified Pro Accounts • 1,050 credits each • +50/day refill</p>
+                  <p className="text-xs text-slate-400">Account allocation is illustrative; credentials and credits are unverified</p>
                 </div>
               </div>
               <button
@@ -2547,9 +2236,9 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
                     </div>
 
                     <div className="text-right font-mono text-xs space-y-0.5">
-                      <div className="text-white font-bold">{acc.creditsBalance || 1050} Credits</div>
-                      <div className="text-[10px] text-emerald-400">+{acc.dailyCreditsRefill || 50}/day refill</div>
-                      <div className="text-[9px] text-slate-500">Latency: {acc.lastPingMs || 42}ms</div>
+                      <div className="text-white font-bold">{acc.telemetryVerified ? `${acc.creditsBalance} Credits` : 'Credits unverified'}</div>
+                      <div className="text-[10px] text-emerald-400">{acc.telemetryVerified ? `+${acc.dailyCreditsRefill}/day refill` : 'Refill unverified'}</div>
+                      <div className="text-[9px] text-slate-500">Latency: {acc.telemetryVerified ? `${acc.lastPingMs}ms` : 'unverified'}</div>
                     </div>
                   </div>
                 ))}
@@ -2557,8 +2246,8 @@ export const GoogleFlowView: React.FC<GoogleFlowViewProps> = ({
             )}
 
             <div className="p-3 rounded-xl bg-teal-950/30 border border-teal-500/20 text-xs text-teal-300 flex items-center justify-between">
-              <span>Total Available War Chest: <strong className="font-mono text-white">3,150 Credits</strong></span>
-              <span>Next Refill: <strong className="font-mono text-emerald-400">+150 Credits at 00:00 UTC</strong></span>
+              <span>Available Credits: <strong className="font-mono text-white">Not measured</strong></span>
+              <span>Next Refill: <strong className="font-mono text-emerald-400">Unknown</strong></span>
             </div>
 
             <div className="flex justify-end pt-2">

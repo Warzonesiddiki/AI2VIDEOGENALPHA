@@ -70,6 +70,7 @@ export const JobsQueueView: React.FC<JobsQueueViewProps> = ({
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      <p role="status" className="text-sm text-amber-300">Legacy job metadata is read-only. Manual transitions and external-effect reconciliation are disabled pending an evidence-backed execution service. Historical succeeded labels are not proof of current artifacts.</p>
       {/* Header */}
       <div className="border-b border-slate-800 pb-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -184,7 +185,7 @@ export const JobsQueueView: React.FC<JobsQueueViewProps> = ({
 
                       {isUnknown && (
                         <button
-                          onClick={() => setReconcileJob(job)}
+                          disabled onClick={() => setReconcileJob(job)}
                           className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[11px] font-semibold"
                         >
                           Reconcile
@@ -193,7 +194,7 @@ export const JobsQueueView: React.FC<JobsQueueViewProps> = ({
 
                       {job.state === 'running' && (
                         <button
-                          onClick={() => handleTransition(job.id, 'cancelled')}
+                          disabled onClick={() => handleTransition(job.id, 'cancelled')}
                           className="px-2 py-1 rounded bg-rose-500/20 text-rose-300 text-[11px]"
                         >
                           Cancel
@@ -289,13 +290,13 @@ export const JobsQueueView: React.FC<JobsQueueViewProps> = ({
                 Cancel
               </button>
               <button
-                onClick={() => handleReconcile('confirmed_failed')}
+                disabled onClick={() => handleReconcile('confirmed_failed')}
                 className="px-3 py-1.5 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 font-medium"
               >
                 Mark Confirmed Failed
               </button>
               <button
-                onClick={() => handleReconcile('confirmed_succeeded')}
+                disabled onClick={() => handleReconcile('confirmed_succeeded')}
                 className="px-3 py-1.5 rounded bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold"
               >
                 Confirm Succeeded

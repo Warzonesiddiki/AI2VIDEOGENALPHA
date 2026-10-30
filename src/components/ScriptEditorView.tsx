@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { reviewStoryCraft } from '../core/storyCraft.ts';
+import React, { useState, useEffect, useRef } from 'react';
 import { EpisodeCard, ScriptVersion, CanonEvent } from '../types/index.ts';
 import { calculateNarrationPacing, calculateWordCount, validateCanonHardRules } from '../core/rules.ts';
 import {
@@ -25,6 +26,8 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
   onBack,
   onRefreshEpisode,
 }) => {
+  const generation = useRef(0);
+  const savingRef = useRef(false);
   const [episode, setEpisode] = useState<EpisodeCard | null>(null);
   const [canonEvents, setCanonEvents] = useState<CanonEvent[]>([]);
   const [scriptText, setScriptText] = useState('');
@@ -33,30 +36,38 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/projects/${projectId}/episodes/${episodeId}`)
-      .then((res) => res.json())
-      .then((res) => {
-        if (res.ok && res.data) {
-          setEpisode(res.data);
-          const activeScript = res.data.scriptVersions[res.data.activeScriptVersionIndex];
-          if (activeScript) {
-            setScriptText(activeScript.fullNarrationText);
-            setTargetWpm(activeScript.targetWpm || 145);
-          }
-        }
-      });
-
-    fetch(`/api/projects/${projectId}/series`)
-      .then((res) => res.json())
-      .catch((err) => console.error(err));
+    const controller = new AbortController();
+    generation.current++; savingRef.current = false; setIsSaving(false);
+    setEpisode(null); setScriptText(''); setSaveNotice(null);
+    fetch(`/api/projects/${projectId}/episodes/${episodeId}`, { signal: controller.signal })
+      .then(async response => {
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || 'Could not load episode');
+        return result.data;
+      })
+      .then(loaded => {
+        if (controller.signal.aborted) return;
+        setEpisode(loaded);
+        const script = loaded.scriptVersions[loaded.activeScriptVersionIndex];
+        setScriptText(script?.fullNarrationText || ''); setTargetWpm(script?.targetWpm || 145);
+      })
+      .catch(error => { if (!controller.signal.aborted) setSaveNotice(error.message); });
+    return () => { generation.current++; controller.abort(); };
   }, [projectId, episodeId]);
 
   const wordCount = calculateWordCount(scriptText);
   const pacing = calculateNarrationPacing(wordCount, targetWpm);
   const canonCheck = validateCanonHardRules(scriptText);
+  const storyCraft = reviewStoryCraft(episode ? {
+    ...episode,
+    activeScriptVersionIndex: 0,
+    scriptVersions: [{ ...episode.scriptVersions[episode.activeScriptVersionIndex], fullNarrationText: scriptText, targetWpm, actualVoiceDurationSeconds: undefined }],
+  } : {});
 
   const handleSaveDraft = async (approve: boolean = false) => {
-    if (!episode) return;
+    if (!episode || savingRef.current) return;
+    const current = generation.current;
+    savingRef.current = true;
     setIsSaving(true);
     setSaveNotice(null);
 
@@ -67,10 +78,9 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
       wordCount: pacing.wordCount,
       estimatedDurationSeconds: pacing.estimatedDurationSeconds,
       targetWpm,
-      actualVoiceDurationSeconds: pacing.estimatedDurationSeconds,
       isApproved: approve,
-      approvedBy: approve ? 'Showrunner (Human Editorial Review)' : undefined,
-      approvalNotes: approve ? 'Approved for scene planning & audio generation' : undefined,
+      approvedBy: approve ? 'Local operator review marker (identity unverified)' : undefined,
+      approvalNotes: approve ? 'Local script review marker only; not independent rights, spend, technical QC or publication approval.' : undefined,
       beats: episode.scriptVersions[0]?.beats || [],
       pronunciationNotes: [
         { term: 'Mistry', guide: 'MIS-tree' },
@@ -98,24 +108,26 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
         body: JSON.stringify(updatedEpisode),
       });
       const data = await res.json();
+      if (current !== generation.current) return;
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Could not save draft');
       if (data.ok) {
         setEpisode(data.data);
         setSaveNotice(
           approve
-            ? 'Script approved! Upstream changes marked dependent scene assets as stale.'
+            ? 'Local review marker saved (not independent approval). Dependent scene assets marked stale.'
             : 'Draft version saved.'
         );
         onRefreshEpisode();
       }
     } catch (err: any) {
-      setSaveNotice(`Failed to save: ${err.message}`);
+      if (current === generation.current) setSaveNotice(`Not saved: ${err.message} Your editor text has been kept; copy it before reloading.`);
     } finally {
-      setIsSaving(false);
+      if (current === generation.current) { savingRef.current = false; setIsSaving(false); }
     }
   };
 
   if (!episode) {
-    return <div className="p-8 text-center text-xs text-slate-500">Loading script editor...</div>;
+    return <div role="status" className="p-8 text-center text-xs text-slate-400">{saveNotice || 'Loading script editor…'}</div>;
   }
 
   const activeVersion = episode.scriptVersions[episode.activeScriptVersionIndex];
@@ -157,10 +169,21 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
             className="px-3.5 py-1.5 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Approve Script (Human Gate)</span>
+            <span>Mark Local Script Review</span>
           </button>
         </div>
       </div>
+
+      <section aria-label="Story craft review" className="p-4 rounded-xl border border-amber-500/25 bg-slate-900 text-sm space-y-2">
+        <h2 className="font-semibold text-amber-200">Story craft — advisory, not a quality score or approval</h2>
+        <p className="text-xs text-slate-400">Check causal escalation, competing needs, a planted solution and an irreversible cost. Reading time is an estimate, not measured voice. A local review marker does not authorize spend or publication.</p>
+        {storyCraft.issues.length > 0 && <ul className="list-disc pl-5 text-xs text-amber-100 space-y-1">
+          {storyCraft.issues.map(issue => <li key={issue.field}>{issue.question}</li>)}
+        </ul>}
+        <details className="text-xs text-slate-300"><summary className="cursor-pointer">Editorial questions for every revision</summary>
+          <ul className="list-disc pl-5 pt-2 space-y-1">{storyCraft.reviewQuestions.map(question => <li key={question}>{question}</li>)}</ul>
+        </details>
+      </section>
 
       {saveNotice && (
         <div className="p-3 rounded bg-slate-900 border border-teal-500/40 text-xs text-teal-300 flex items-center justify-between">

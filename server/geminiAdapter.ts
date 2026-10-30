@@ -1,7 +1,8 @@
+import { buildStoryOutline } from '../src/core/storyCraft.ts';
 /**
  * Ternfall Studio - Server-Side Gemini API Adapter
  * Uses @google/genai TypeScript SDK. Server-side only; secrets never leak to client.
- * Provides resilient fallbacks when API key is not configured or network is offline.
+ * Provides explicitly unreviewed local planning scaffolds without a configured key; paid execution remains disabled.
  */
 
 import { GoogleGenAI } from '@google/genai';
@@ -18,8 +19,7 @@ export class GeminiAdapter {
   private client: GoogleGenAI | null = null;
   private hasValidKey = false;
 
-  constructor() {
-    const key = process.env.GEMINI_API_KEY;
+  constructor(key = process.env.GEMINI_API_KEY) {
     if (key && key !== 'MY_GEMINI_API_KEY' && key.trim().length > 10) {
       try {
         this.client = new GoogleGenAI({ apiKey: key.trim() });
@@ -35,7 +35,7 @@ export class GeminiAdapter {
   }
 
   /**
-   * Generates or expands an outline beat sheet using Gemini 2.5 Flash.
+   * Returns a local editorial scaffold without a key. Configured paid generation remains disabled.
    */
   public async generateOutline(params: {
     workingTitle: string;
@@ -48,66 +48,19 @@ export class GeminiAdapter {
       return {
         success: true,
         isAiGenerated: false,
-        data: {
-          beats: [
-            { name: 'Cold Open (00:00)', snippet: 'Analog pressure needle twitches eight times on Basin 3 wall.' },
-            { name: 'Premise (00:25)', snippet: 'Rhea Mistry investigates silence of official emergency siren network.' },
-            { name: 'Inciting Failure (01:30)', snippet: 'Digital SCADA panel falsely reports gate open; lower sluice jammed.' },
-            { name: 'Human Encounter (03:00)', snippet: 'Mara Ilyan hammers on trapped maintenance hatch with pipe wrench.' },
-            { name: 'First Evidence (05:00)', snippet: 'The Still turn toward rhythmic pump shudder rather than shouting.' },
-            { name: 'Moral Choice (07:00)', snippet: 'Opening upper bypass sacrifices lower municipal blueprint archive.' },
-            { name: 'Action & Consequence (09:30)', snippet: 'Manual gate shifted; night mechanics saved; blueprint room floods.' },
-            { name: 'Aftermath (12:30)', snippet: 'Rhea sketches paper route from memory; faint radio call from Kabir.' },
-            { name: 'Cliffhanger (14:20)', snippet: 'Second eight-beat pulse begins four miles north in the blackout.' },
-          ],
-        },
-        providerNotice: 'Gemini API not configured. Provided verified canonical 9-beat template.',
+        data: buildStoryOutline(params),
+        providerNotice: 'Local editorial scaffold only: not AI-generated, not a finished script and not verified or approved. No provider request was sent.',
+
       };
     }
 
-    try {
-      const prompt = `You are the lead narrative architect for the original survival thriller "The Quiet Hours: Ternfall".
-Generate a 9-beat dramatic outline for a 15-minute episode.
-Title: "${params.workingTitle}"
-Logline: "${params.logline}"
-Characters: ${params.characters.join(', ')}
-Location: ${params.location}
-Canon Context: ${params.canonNotes || 'Infection spreads only by contact; The Still respond to mechanical pump pulses; no talking zombies; no airborne virus.'}
-
-Output JSON format:
-{
-  "beats": [
-    {"name": "Cold Open (00:00)", "snippet": "..."},
-    ...
-  ]
-}`;
-
-      const response = await this.client.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.7,
-        },
-      });
-
-      const text = response.text || '{}';
-      const parsed = JSON.parse(text);
-
-      return {
-        success: true,
-        isAiGenerated: true,
-        data: parsed,
-      };
-    } catch (err: any) {
-      console.warn('[GeminiAdapter] generateOutline API call failed, using safe fallback:', err.message);
-      return {
-        success: false,
-        isAiGenerated: false,
-        data: { beats: [] },
-        providerNotice: `Provider error: ${err.message}`,
-      };
-    }
+    // Do not make billable calls before a durable authorization/reservation service exists.
+    return {
+      success: false,
+      isAiGenerated: false,
+      data: { beats: [] },
+      providerNotice: 'Paid generation is disabled pending scoped operator approval and transactional spend reservations. No provider request was sent.',
+    };
   }
 
   /**

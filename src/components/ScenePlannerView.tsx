@@ -1,3 +1,4 @@
+import { LocalRenderPanel } from './LocalRenderPanel.tsx';
 import React, { useState } from 'react';
 import { ShotItem, AudioStemConfig } from '../types/index.ts';
 import { generateSrtContent, generateVttContent } from '../core/captions.ts';
@@ -17,34 +18,13 @@ import {
 } from 'lucide-react';
 
 interface ScenePlannerViewProps {
+  projectId: string;
   episodeId: string;
 }
 
-export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId }) => {
+export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ projectId, episodeId }) => {
   const [activeTab, setActiveTab] = useState<'storyboard' | 'audio_stems' | 'captions' | 'render_script'>('storyboard');
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
-  const [renderScript, setRenderScript] = useState<string | null>(null);
-  const [renderCliCommand, setRenderCliCommand] = useState<string | null>(null);
-  const [loadingScript, setLoadingScript] = useState(false);
-  const [copiedScript, setCopiedScript] = useState(false);
-  const [copiedCli, setCopiedCli] = useState(false);
-
-  const loadRenderScript = async () => {
-    setLoadingScript(true);
-    try {
-      const res = await fetch(`/api/projects/proj_ternfall_01/episodes/${episodeId}/render-script`);
-      const data = await res.json();
-      if (data.ok && data.data) {
-        setRenderScript(data.data.script);
-        setRenderCliCommand(data.data.cliCommand);
-      }
-    } catch (err) {
-      console.error('Failed to load render script:', err);
-    } finally {
-      setLoadingScript(false);
-    }
-  };
-
   const [audioConfig, setAudioConfig] = useState<AudioStemConfig>({
     narrationVolume: 0.9,
     musicVolume: 0.25,
@@ -53,7 +33,7 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
     loudnessTargetLufs: -14.0,
   });
 
-  // Sample verified shots mapped to the Pilot beats
+  // Illustrative pilot planning examples, not approved media or production evidence.
   const sampleShots: ShotItem[] = [
     {
       id: 'shot_001',
@@ -76,7 +56,7 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
       captionText: 'The brass needle on the Basin Three gauge did not tremble. It twitched eight times...',
       captionSafeChecked: true,
       assetSource: 'project_illustration',
-      isApproved: true,
+      isApproved: false,
     },
     {
       id: 'shot_002',
@@ -99,7 +79,7 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
       captionText: 'Rhea was thirty-one, wore a cropped slate-teal rain jacket stiff with salt mist...',
       captionSafeChecked: true,
       assetSource: 'project_illustration',
-      isApproved: true,
+      isApproved: false,
     },
     {
       id: 'shot_003',
@@ -122,7 +102,7 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
       captionText: 'Two night-shift mechanics are inside. If we don’t clear the upper bypass, the water seals them.',
       captionSafeChecked: true,
       assetSource: 'project_illustration',
-      isApproved: true,
+      isApproved: false,
     },
     {
       id: 'shot_004',
@@ -145,7 +125,7 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
       captionText: 'Their heads turned in unison—not toward Mara’s wrench, but toward the rhythmic shudder of the pump.',
       captionSafeChecked: true,
       assetSource: 'project_illustration',
-      isApproved: true,
+      isApproved: false,
     },
   ];
 
@@ -173,6 +153,7 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      <p role="status" className="text-sm text-amber-300">Storyboard, audio and caption examples are illustrative planning data, not verified assets or approvals. Real Local Render uses only your supplied episode files.</p>
       {/* Header */}
       <div className="border-b border-slate-800 pb-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -184,7 +165,7 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
               Storyboard & Audio Stems ({episodeId})
             </h1>
             <p className="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
-              Scene breakdown with verified camera framing, honest 2D limited-animation labels, audio stem ducking, and dual-format caption safe zones (16:9 Long-form and 9:16 Shorts).
+              Illustrative scene breakdown, audio-mix targets and caption safe-zone examples. Planning controls do not generate media or certify framing, timing, audio ducking or approvals.
             </p>
           </div>
 
@@ -248,10 +229,7 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
           Captions & Safe Margins (SRT/VTT)
         </button>
         <button
-          onClick={() => {
-            if (!renderScript) loadRenderScript();
-            setActiveTab('render_script');
-          }}
+          onClick={() => setActiveTab('render_script')}
           className={`px-3 py-1.5 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
             activeTab === 'render_script'
               ? 'bg-slate-800 text-teal-300'
@@ -259,7 +237,7 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
           }`}
         >
           <Terminal className="w-3.5 h-3.5" />
-          <span>Local FFmpeg Script</span>
+          <span>Real Local Render</span>
         </button>
       </div>
 
@@ -466,96 +444,9 @@ export const ScenePlannerView: React.FC<ScenePlannerViewProps> = ({ episodeId })
         </div>
       )}
 
-      {/* TAB 4: LOCAL FFMPEG RENDER SCRIPT */}
-      {activeTab === 'render_script' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-              <div>
-                <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-teal-400" />
-                  <span>Local FFmpeg Composite Script ({episodeId})</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  100% local rendering on Windows 10/11 (WSL2 / Git-Bash) or Linux. Composites 1080p 24fps master MP4 with stereo AAC audio with zero cloud compute costs.
-                </p>
-              </div>
+      {/* Execution uses supplied assets and measured QC, not illustrative planning data. */}
+      {activeTab === 'render_script' && <LocalRenderPanel projectId={projectId} episodeId={episodeId} />}
 
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => {
-                    if (renderScript) {
-                      const blob = new Blob([renderScript], { type: 'text/x-sh' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `render_${episodeId}.sh`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    }
-                  }}
-                  disabled={!renderScript}
-                  className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-40"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download .sh</span>
-                </button>
-                <button
-                  onClick={() => {
-                    if (renderCliCommand) {
-                      navigator.clipboard.writeText(renderCliCommand);
-                      setCopiedCli(true);
-                      setTimeout(() => setCopiedCli(false), 2000);
-                    }
-                  }}
-                  className="px-3 py-1.5 rounded bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition-colors"
-                >
-                  {copiedCli ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedCli ? 'Copied Command' : 'Copy CLI Command'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* CLI Quick Runner snippet */}
-            <div className="p-3 rounded bg-slate-950 border border-slate-800 space-y-1.5">
-              <div className="text-[11px] text-slate-400 font-medium">Generate script directly in terminal via CLI:</div>
-              <code className="block p-2 rounded bg-slate-900 border border-slate-800/80 font-mono text-[11px] text-teal-300 select-all overflow-x-auto whitespace-nowrap">
-                npm run studio -- render script {episodeId} --save
-              </code>
-            </div>
-
-            {/* Script Textarea Preview */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span className="font-semibold text-slate-300">Generated Shell Script:</span>
-                {renderScript && (
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(renderScript);
-                      setCopiedScript(true);
-                      setTimeout(() => setCopiedScript(false), 2000);
-                    }}
-                    className="text-teal-400 hover:text-teal-300 flex items-center gap-1 text-[11px]"
-                  >
-                    {copiedScript ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    <span>{copiedScript ? 'Copied' : 'Copy Full Script'}</span>
-                  </button>
-                )}
-              </div>
-              {loadingScript ? (
-                <div className="p-8 text-center text-xs text-slate-500 font-mono">Generating render script...</div>
-              ) : (
-                <textarea
-                  readOnly
-                  rows={16}
-                  value={renderScript || '# Click "Local FFmpeg Script" tab above to generate'}
-                  className="w-full p-3.5 bg-slate-950 border border-slate-800 rounded font-mono text-[11px] text-teal-200/90 leading-relaxed resize-none focus:outline-none"
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

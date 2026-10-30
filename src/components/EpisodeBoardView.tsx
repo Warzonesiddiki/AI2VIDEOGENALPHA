@@ -29,6 +29,7 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const [isCreating, setIsCreating] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newLogline, setNewLogline] = useState('');
   const [newObjective, setNewObjective] = useState('');
@@ -82,31 +83,37 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
     };
 
     try {
-      await fetch(`/api/projects/${projectId}/episodes`, {
+      const response = await fetch(`/api/projects/${projectId}/episodes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newEp),
       });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Episode creation failed');
+      setActionError(null);
       setIsCreating(false);
       setNewTitle('');
       setNewLogline('');
       setNewObjective('');
       onRefreshEpisodes();
     } catch (err) {
-      console.error('Failed to create episode:', err);
+      setActionError(err instanceof Error ? err.message : 'Episode creation failed');
     }
   };
 
   const handleDuplicate = async (epId: string) => {
     try {
-      await fetch(`/api/projects/${projectId}/episodes/${epId}/duplicate`, {
+      const response = await fetch(`/api/projects/${projectId}/episodes/${epId}/duplicate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Episode duplication failed');
+      setActionError(null);
       onRefreshEpisodes();
     } catch (err) {
-      console.error('Failed to duplicate episode:', err);
+      setActionError(err instanceof Error ? err.message : 'Episode duplication failed');
     }
   };
 
@@ -131,6 +138,7 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      {actionError && <p role="alert" className="text-sm text-rose-300">{actionError}</p>}
       {/* Header */}
       <div className="border-b border-slate-800 pb-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

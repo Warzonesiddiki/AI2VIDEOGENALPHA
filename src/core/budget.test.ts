@@ -26,6 +26,7 @@ test('evaluateSpendAuthorization: blocks unknown cost unless manual ceiling is s
 
   const unknownRes = evaluateSpendAuthorization({
     projectId: 'proj_1',
+    episodeId: 'S01E001',
     provider: 'gemini_omni',
     estimatedCostUsd: 0,
     isCostEstimateUnknown: true,
@@ -50,6 +51,7 @@ test('evaluateSpendAuthorization: enforces per-run, per-episode, and monthly cap
   // Exceeds per-run cap
   const perRunRes = evaluateSpendAuthorization({
     projectId: 'proj_1',
+    episodeId: 'S01E001',
     provider: 'gemini_omni',
     estimatedCostUsd: 16,
     caps,
@@ -60,9 +62,10 @@ test('evaluateSpendAuthorization: enforces per-run, per-episode, and monthly cap
   assert.equal(perRunRes.authorized, false);
   assert.match(perRunRes.reason!, /Exceeds per-run cap/);
 
-  // Valid within cap
+  // Valid within cap, with a scoped operator grant
   const validRes = evaluateSpendAuthorization({
     projectId: 'proj_1',
+    episodeId: 'S01E001',
     provider: 'gemini_nano',
     estimatedCostUsd: 5,
     caps,
@@ -70,8 +73,9 @@ test('evaluateSpendAuthorization: enforces per-run, per-episode, and monthly cap
     currentEpisodeSpentUsd: 10,
     currentRunSpentUsd: 2,
   });
-  assert.equal(validRes.authorized, true);
-  assert.ok(validRes.reservationId);
+  assert.equal(validRes.authorized, false);
+  assert.match(validRes.reason!, /approval grant is required/);
+  assert.equal(validRes.reservationId, undefined);
 });
 
 test('evaluateSpendAuthorization: verifies approval grant revocation, expiration, and provider limits', () => {
@@ -85,6 +89,7 @@ test('evaluateSpendAuthorization: verifies approval grant revocation, expiration
   // 1. Revoked grant
   const revokedRes = evaluateSpendAuthorization({
     projectId: 'proj_1',
+    episodeId: 'S01E001',
     provider: 'gemini_nano',
     estimatedCostUsd: 5,
     caps,
@@ -111,6 +116,7 @@ test('evaluateSpendAuthorization: verifies approval grant revocation, expiration
   // 2. Expired grant
   const expiredRes = evaluateSpendAuthorization({
     projectId: 'proj_1',
+    episodeId: 'S01E001',
     provider: 'gemini_nano',
     estimatedCostUsd: 5,
     caps,
@@ -137,6 +143,7 @@ test('evaluateSpendAuthorization: verifies approval grant revocation, expiration
   // 3. Provider not authorized in grant
   const providerMismatchRes = evaluateSpendAuthorization({
     projectId: 'proj_1',
+    episodeId: 'S01E001',
     provider: 'unauthorized_provider',
     estimatedCostUsd: 5,
     caps,
@@ -163,6 +170,7 @@ test('evaluateSpendAuthorization: verifies approval grant revocation, expiration
   // 4. Grant budget exhausted
   const exhaustedRes = evaluateSpendAuthorization({
     projectId: 'proj_1',
+    episodeId: 'S01E001',
     provider: 'gemini_nano',
     estimatedCostUsd: 15,
     caps,
