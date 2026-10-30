@@ -10,7 +10,7 @@ import { flowPlanRouter } from './flowRoutes.ts';
 import { episodeEditHandler } from './episodeEdits.ts';
 import { verifyFlowBatch } from './flowVerification.ts';
 import { createGoogleFlowPlan, computeFlowCheckpoint } from '../src/core/flow.ts';
-import { RevisionConflict } from './lib/conflicts.ts';
+import { EpisodeSourceConflict, RevisionConflict } from './lib/conflicts.ts';
 
 const project = 'proj_ternfall_01', episodeId = 'S01E001';
 async function fixture(t: any) {
@@ -34,6 +34,7 @@ const post = (url: string, body: unknown) => fetch(url, { method: 'POST', header
 async function partialFixture(t: any) {
   const fixtureData = await fixture(t);
   const plan = createGoogleFlowPlan(episodeId, 'Original fixture', 25, 24, 'keyframe_storyboard', project);
+  plan.sourceEpisodeRevision = 0;
   await fixtureData.first.saveGoogleFlowPlan(project, plan);
   const dir = path.join(fixtureData.root, 'projects', project, 'assets', 'flow_renders', episodeId); await fs.mkdir(dir, { recursive: true });
   const file = path.join(dir, 'frame_00025.png');
@@ -54,10 +55,10 @@ test('episode revision compare-and-swap prevents stale edits across storage inst
 
 test('plan replacement is revision-checked and scoped to its actual project', async t => {
   const { first, second } = await fixture(t);
-  const one = createGoogleFlowPlan(episodeId, 'First', 1, 24, 'dense_24fps', project);
+  const one = createGoogleFlowPlan(episodeId, 'First', 1, 24, 'dense_24fps', project); one.sourceEpisodeRevision = 0;
   await first.saveGoogleFlowPlan(project, one);
   const stale = (await second.getGoogleFlowPlan(project, episodeId))!;
-  const replacement = createGoogleFlowPlan(episodeId, 'New', 2, 24, 'dense_24fps', project); replacement.revision = one.revision;
+  const replacement = createGoogleFlowPlan(episodeId, 'New', 2, 24, 'dense_24fps', project); replacement.revision = one.revision; replacement.sourceEpisodeRevision = 0;
   await first.saveGoogleFlowPlan(project, replacement);
   await assert.rejects(second.saveGoogleFlowPlan(project, stale), RevisionConflict);
   assert.equal((await first.getGoogleFlowPlan(project, episodeId))?.totalFramesExpected, 48);
@@ -91,7 +92,7 @@ test('a final one-frame batch gets decoded evidence and resume still finds earli
 test('legacy ingested/verified labels without decode evidence cannot claim progress', async t => {
   const { first } = await fixture(t);
   const plan = createGoogleFlowPlan(episodeId, 'Legacy fixture', 1, 24, 'dense_24fps', project);
-  plan.batches[0].status = 'verified'; plan.summary.verifiedBatches = 1; plan.summary.completionPercentage = 100;
+  plan.sourceEpisodeRevision = 0; plan.batches[0].status = 'verified'; plan.summary.verifiedBatches = 1; plan.summary.completionPercentage = 100;
   await first.saveGoogleFlowPlan(project, plan);
   const loaded = (await first.getGoogleFlowPlan(project, episodeId))!;
   assert.equal(loaded.summary.verifiedBatches, 0); assert.equal(loaded.summary.completionPercentage, 0);
@@ -136,7 +137,7 @@ test('a replacement plan committed during frame inspection rejects the old verif
   const originalSave = first.saveGoogleFlowPlan.bind(first);
   first.saveGoogleFlowPlan = async (projectId, inspected) => {
     const replacement = createGoogleFlowPlan(episodeId, 'Changed during inspection', 26, 24, 'keyframe_storyboard', projectId);
-    replacement.revision = plan.revision;
+    replacement.revision = plan.revision; replacement.sourceEpisodeRevision = plan.sourceEpisodeRevision;
     await second.saveGoogleFlowPlan(projectId, replacement);
     await originalSave(projectId, inspected);
   };
@@ -152,6 +153,7 @@ test('secondary-project verification reads only its own frames and keeps other p
   const source = (await first.getEpisode(project, episodeId))!;
   await first.saveEpisode(other.id, { ...source, projectId: other.id, seriesId: other.activeSeriesId });
   const plan = createGoogleFlowPlan(episodeId, 'Secondary project fixture', 1, 24, 'keyframe_storyboard', other.id);
+  plan.sourceEpisodeRevision = (await first.getEpisode(other.id, episodeId))!.revision ?? 0;
   await first.saveGoogleFlowPlan(other.id, plan);
   const directory = path.join(root, 'projects', other.id, 'assets', 'flow_renders', episodeId); await fs.mkdir(directory, { recursive: true });
   await fs.writeFile(path.join(directory, 'frame_00001.png'), await sharp({ create: { width: 1920, height: 1080, channels: 3, background: 'navy' } }).png().toBuffer());
@@ -186,4 +188,71 @@ test('Flow GET plan/checkpoint do not create preparation records and disable cac
   const prepared = await first.getGoogleFlowPlan(project, episodeId);
   for (const route of ['plan', 'checkpoint']) assert.equal((await fetch(`${base}/flow/${route}/${episodeId}`)).status, 200);
   assert.deepEqual(await first.getGoogleFlowPlan(project, episodeId), prepared);
+});
+
+test('planning API returns bounded summary and paginated, episode-specific draft prompts', async t => {
+  const { first } = await fixture(t); const base = await api(t, first);
+  const initial = await first.getEpisode(project, episodeId); assert.ok(initial);
+  const planResponse = await post(`${base}/flow/plan/${episodeId}?view=summary`, { durationSeconds: 50, fps: 24, mode: 'keyframe_storyboard', expectedRevision: 0 });
+  assert.equal(planResponse.status, 200);
+  const summary = (await planResponse.json()).data;
+  assert.equal(summary.episodeId, episodeId); assert.equal(summary.totalBatches, 3); assert.equal(summary.revision, 1);
+  assert.equal(summary.batches, undefined);
+  const getSummary = (await (await fetch(`${base}/flow/plan/${episodeId}?view=summary`)).json()).data;
+  assert.equal(getSummary.batches, undefined); assert.ok(JSON.stringify(getSummary).length < 10_000);
+  const pageResponse = await fetch(`${base}/flow/plan/${episodeId}/batches?start=2&limit=1`);
+  assert.equal(pageResponse.status, 200); assert.equal(pageResponse.headers.get('cache-control'), 'no-store');
+  const page = (await pageResponse.json()).data;
+  assert.equal(page.revision, 1); assert.equal(page.start, 2); assert.equal(page.batches.length, 1); assert.equal(page.batches[0].batchIndex, 2);
+  assert.match(page.batches[0].prompts[0].promptText, /DRAFT/);
+  assert.ok(page.batches[0].prompts[0].promptText.includes(initial.workingTitle));
+  assert.ok(!page.batches[0].prompts[0].promptText.includes('The Quiet Hours: Ternfall - South Gate District'));
+  for (const query of ['start=0', 'start=1&limit=101', 'start=2tail', 'start=4', 'start=9007199254740992']) {
+    assert.equal((await fetch(`${base}/flow/plan/${episodeId}/batches?${query}`)).status, 400, query);
+  }
+  const full = (await (await fetch(`${base}/flow/plan/${episodeId}`)).json()).data;
+  assert.equal(full.batches.length, 3); // Existing API clients retain the full response by default.
+});
+
+test('source episode changes invalidate a draft plan before verification or checkpoint use', async t => {
+  const { first, second } = await fixture(t); const base = await api(t, first);
+  const response = await post(`${base}/flow/plan/${episodeId}?view=summary`, { durationSeconds: 1, expectedRevision: 0 });
+  assert.equal(response.status, 200); const initial = (await response.json()).data;
+  assert.equal(initial.sourceEpisodeRevision, 0); assert.equal(initial.sourceState, 'current');
+  const changed = (await second.getEpisode(project, episodeId))!; changed.workingTitle = 'Changed after planning'; await second.saveEpisode(project, changed);
+  const loaded = (await (await fetch(`${base}/flow/plan/${episodeId}?view=summary`)).json()).data;
+  assert.equal(loaded.sourceState, 'stale');
+  assert.equal((await fetch(`${base}/flow/checkpoint/${episodeId}`)).status, 400);
+  const verification = await post(`${base}/flow/ingest`, { episodeId, batchId: `GF_${episodeId}_B0001`, expectedRevision: initial.revision });
+  assert.equal(verification.status, 409); assert.equal((await verification.json()).code, 'EPISODE_REVISION_CONFLICT');
+  const old = (await first.getGoogleFlowPlan(project, episodeId))!;
+  assert.equal(old.revision, initial.revision); assert.equal(old.summary.verifiedBatches, 0);
+  const refreshed = await post(`${base}/flow/plan/${episodeId}?view=summary`, { durationSeconds: 1, expectedRevision: initial.revision });
+  assert.equal(refreshed.status, 200); const latest = (await refreshed.json()).data;
+  assert.equal(latest.sourceEpisodeRevision, 1); assert.equal(latest.sourceState, 'current');
+});
+
+test('legacy plans without source revision remain readable but cannot be verified or treated as current', async t => {
+  const { root, first } = await fixture(t);
+  const legacy = createGoogleFlowPlan(episodeId, 'Historical', 1, 24, 'keyframe_storyboard', project);
+  const file = path.join(root, 'projects', project, 'flow_plans', `${episodeId}.json`);
+  await first.atomicWriteJson(file, legacy);
+  const loaded = (await first.getGoogleFlowPlan(project, episodeId))!;
+  assert.equal(loaded.sourceState, 'unknown');
+  await assert.rejects(verifyFlowBatch(first, project, episodeId, loaded.batches[0].batchId, loaded.revision), /no source episode revision/);
+  await assert.rejects(first.saveGoogleFlowPlan(project, loaded), /no valid source episode revision/);
+  assert.deepEqual(await first.readJson(file, null), legacy);
+});
+
+test('an episode edit during frame inspection prevents recording evidence against stale source', async t => {
+  const { first, second, plan, file } = await partialFixture(t);
+  await fs.writeFile(file, await sharp({ create: { width: 1920, height: 1080, channels: 3, background: 'teal' } }).png().toBuffer());
+  const originalSave = first.saveGoogleFlowPlan.bind(first);
+  first.saveGoogleFlowPlan = async (projectId, inspected) => {
+    const edit = (await second.getEpisode(projectId, episodeId))!; edit.logline = 'New logline during inspection';
+    await second.saveEpisode(projectId, edit, true); await originalSave(projectId, inspected);
+  };
+  await assert.rejects(verifyFlowBatch(first, project, episodeId, plan.batches[1].batchId, plan.revision), EpisodeSourceConflict);
+  const stored = (await second.getGoogleFlowPlan(project, episodeId))!;
+  assert.equal(stored.sourceState, 'stale'); assert.equal(stored.revision, plan.revision); assert.equal(stored.batches[1].verification, undefined);
 });

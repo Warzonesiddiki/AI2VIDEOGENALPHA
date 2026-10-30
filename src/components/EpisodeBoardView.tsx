@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { EpisodeCard } from '../types/index.ts';
 import {
   Plus,
@@ -16,7 +16,7 @@ interface EpisodeBoardViewProps {
   projectId: string;
   episodes: EpisodeCard[];
   onOpenEpisode: (epId: string) => void;
-  onStartAutoproduce: (epId: string) => void;
+  onPlanEpisode: (epId: string) => void;
   onRefreshEpisodes: () => void;
 }
 
@@ -24,12 +24,16 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
   projectId,
   episodes,
   onOpenEpisode,
-  onStartAutoproduce,
+  onPlanEpisode,
   onRefreshEpisodes,
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const [isCreating, setIsCreating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionPending, setActionPending] = useState(false);
+  const actionInFlight = useRef(false);
+  const createKey = useRef<string | null>(null);
+  const duplicateKeys = useRef<Record<string, string>>({});
   const [newTitle, setNewTitle] = useState('');
   const [newLogline, setNewLogline] = useState('');
   const [newObjective, setNewObjective] = useState('');
@@ -38,6 +42,7 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
     isReady: boolean;
     distinctness: any;
     canonValidation: any;
+    readinessNotice: string;
   } | null>(null);
 
   const filteredEpisodes = episodes.filter((ep) => {
@@ -47,74 +52,40 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
 
   const handleCreateEpisode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle) return;
-
-    const nextNum = episodes.length + 1;
-    const newEp: Partial<EpisodeCard> = {
-      id: `S01E${String(nextNum).padStart(3, '0')}`,
-      dbId: `ep_${Date.now()}`,
-      projectId,
-      seriesId: `series_${projectId}`,
-      season: 1,
-      episodeNumber: nextNum,
-      arcNumber: 1,
-      workingTitle: newTitle,
-      logline: newLogline || 'Survivors navigate the delta drainage district under siren failure.',
-      centralDramaticQuestion: 'Will the crew navigate the barrier without triggering the infected?',
-      timeline: { storyDate: `Day ${nextNum}, 08:00 AM`, elapsedTime: '6 hours', confidence: 'confirmed' },
-      settingIds: ['loc_south_gate'],
-      povCharacterIds: ['rhea-mistry'],
-      aPlot: 'Investigation of mechanical pump oscillations',
-      bPlot: 'Mara organizes water storage for shift mechanics',
-      physicalObjective: newObjective || 'Secure the bypass hatch',
-      humanConflict: 'Debate on information transparency vs operational secrecy',
-      characterTurn: 'Admitting past engineering error openly',
-      majorDecision: 'Choosing public ledger over executive decree',
-      consequence: 'Neighborhood gains access to clean bypass route',
-      clueOrPayoff: 'Unheard acoustic vibration recorded on tape',
-      endingBeat: 'Quiet hold on tide mark at twilight',
-      status: 'planned',
-      scriptVersions: [],
-      activeScriptVersionIndex: 0,
-      visualMotifs: ['estuary teal tide line', 'analog needle dial'],
-      factualClaimIds: [],
-      fictionalRuleIds: ['rule_infection_vector'],
-      staleDownstreamAssets: false,
-    };
-
+    if (!newTitle.trim() || actionInFlight.current) return;
+    actionInFlight.current = true; setActionPending(true); setActionError(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/episodes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newEp),
+      createKey.current ||= crypto.randomUUID();
+      const response = await fetch(`/api/projects/${projectId}/episodes/create`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idempotencyKey: createKey.current, workingTitle: newTitle, logline: newLogline, physicalObjective: newObjective }),
       });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || 'Episode creation failed');
-      setActionError(null);
-      setIsCreating(false);
-      setNewTitle('');
-      setNewLogline('');
-      setNewObjective('');
+      createKey.current = null;
+      setIsCreating(false); setNewTitle(''); setNewLogline(''); setNewObjective('');
       onRefreshEpisodes();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Episode creation failed');
-    }
+    } finally { actionInFlight.current = false; setActionPending(false); }
   };
 
   const handleDuplicate = async (epId: string) => {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true; setActionPending(true); setActionError(null);
     try {
+      const key = duplicateKeys.current[epId] ||= crypto.randomUUID();
       const response = await fetch(`/api/projects/${projectId}/episodes/${epId}/duplicate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idempotencyKey: key }),
       });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || 'Episode duplication failed');
-      setActionError(null);
+      delete duplicateKeys.current[epId];
       onRefreshEpisodes();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Episode duplication failed');
-    }
+    } finally { actionInFlight.current = false; setActionPending(false); }
   };
 
   const handleRunChecks = async (epId: string) => {
@@ -123,16 +94,19 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
         method: 'POST',
       });
       const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Episode checks failed');
+      setActionError(null);
       if (data.ok) {
         setCheckResult({
           epId,
           isReady: data.data.isReadyForProduction,
           distinctness: data.data.distinctness,
           canonValidation: data.data.canonValidation,
+          readinessNotice: data.data.readinessNotice,
         });
       }
     } catch (err) {
-      console.error('Failed to run checks:', err);
+      setActionError(err instanceof Error ? err.message : 'Failed to run checks');
     }
   };
 
@@ -150,12 +124,13 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
               Episode Board
             </h1>
             <p className="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
-              Every card represents a distinct 15-minute story unit with its own dramatic question, objective, and consequences. Duplicate actions create version-linked variants without overwriting canon.
+              Cards are drafts. Distinctness, timing, dramatic choices and consequences require review. Duplicating creates a linked variant without changing the source.
             </p>
           </div>
 
           <button
-            onClick={() => setIsCreating(true)}
+            onClick={() => { setActionError(null); setIsCreating(true); }}
+            disabled={actionPending}
             className="px-3.5 py-1.5 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 shadow-sm transition-colors shrink-0"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -184,7 +159,7 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
               : 'hover:text-slate-200'
           }`}
         >
-          Script Approved
+          Local Script Review
         </button>
         <button
           onClick={() => setSelectedFilter('planned')}
@@ -230,7 +205,7 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
                         : 'bg-amber-500/15 text-amber-300'
                     }`}
                   >
-                    {ep.status.replace(/_/g, ' ')}
+                    {ep.status === 'script_approved' ? 'local script review' : ep.status.replace(/_/g, ' ')}
                   </span>
                 </div>
 
@@ -269,6 +244,7 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
                   </button>
                   <button
                     onClick={() => handleDuplicate(ep.id)}
+                    disabled={actionPending}
                     className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
                     title="Duplicate Episode Variant"
                   >
@@ -284,11 +260,11 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
                 </div>
 
                 <button
-                  onClick={() => onStartAutoproduce(ep.id)}
+                  onClick={() => onPlanEpisode(ep.id)}
                   className="px-3 py-1 rounded bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/30 text-xs font-medium flex items-center gap-1 transition-colors"
                 >
                   <Play className="w-3 h-3 fill-current" />
-                  <span>Produce</span>
+                  <span>Plan / render</span>
                 </button>
               </div>
             </div>
@@ -303,7 +279,7 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-teal-400" />
-                <span>Preproduction Quality Audit ({checkResult.epId})</span>
+                <span>Advisory Checks ({checkResult.epId})</span>
               </h3>
               <button
                 onClick={() => setCheckResult(null)}
@@ -331,16 +307,18 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
                 ))}
                 {checkResult.distinctness.isDistinct && (
                   <div className="text-emerald-400 mt-1 text-[11px]">
-                    ✓ Unique central dramatic question and non-repetitive plot beats.
+                    No similarity warning from this heuristic. It does not prove uniqueness or quality.
                   </div>
                 )}
               </div>
 
               <div className="p-3 rounded bg-slate-950 border border-slate-800">
                 <div className="font-semibold text-slate-200 mb-1">
-                  2. Canon Hard Invariants:
+                  2. Canon keyword heuristic:
                 </div>
-                {checkResult.canonValidation.violatesHardRules ? (
+                {!checkResult.canonValidation.evaluated ? (
+                  <div className="text-amber-300 text-[11px]">{checkResult.canonValidation.reason || 'No configured check was evaluated.'}</div>
+                ) : checkResult.canonValidation.violatesHardRules ? (
                   <div className="space-y-1">
                     {checkResult.canonValidation.infractions.map((inf: string, i: number) => (
                       <div key={i} className="text-rose-400 text-[11px]">
@@ -350,12 +328,13 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
                   </div>
                 ) : (
                   <div className="text-emerald-400 text-[11px]">
-                    ✓ No airborne transmission claims. No water infection misconceptions.
+                    No configured keyword rule was triggered. This is not a canon or factual certification.
                   </div>
                 )}
               </div>
             </div>
 
+            <p className="text-xs text-amber-300">Not certified ready. {checkResult.readinessNotice}</p>
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => setCheckResult(null)}
@@ -421,19 +400,23 @@ export const EpisodeBoardView: React.FC<EpisodeBoardViewProps> = ({
               </div>
             </div>
 
+            {actionError && <p role="alert" className="text-xs text-rose-300">{actionError}</p>}
+            <p className="text-xs text-slate-400">A retry uses the same request key. If the response was lost, check the board before cancelling and starting a different request.</p>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setIsCreating(false)}
+                onClick={() => { createKey.current = null; setIsCreating(false); }}
+                disabled={actionPending}
                 className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
               >
                 Cancel
               </button>
               <button
                 type="submit"
+                disabled={actionPending}
                 className="px-4 py-1.5 rounded bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold"
               >
-                Create Card
+                {actionPending ? 'Creating…' : 'Create Card'}
               </button>
             </div>
           </form>

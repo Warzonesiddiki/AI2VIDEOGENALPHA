@@ -10,6 +10,10 @@ export class MediaIntegrityError extends Error {
   readonly code = 'MEDIA_INTEGRITY_FAILED';
   constructor() { super('Export bytes no longer match saved technical QC. Playback is blocked; inspect the output and create a new verified render.'); }
 }
+export class MediaVerificationBusyError extends Error {
+  readonly code = 'MEDIA_VERIFICATION_BUSY';
+  constructor() { super('Media verification is busy. Retry shortly.'); }
+}
 async function hashOpenedFile(handle: FileHandle, size: number): Promise<string> {
   const digest = createHash('sha256');
   for await (const chunk of handle.createReadStream({ start: 0, end: size - 1, autoClose: false })) digest.update(chunk);
@@ -33,7 +37,7 @@ export class VerifiedMediaReader {
       if (!this.verified.has(key)) {
         let pending = this.pending.get(key);
         if (!pending) {
-          if (this.pending.size >= 2) throw Object.assign(new Error('Media verification is busy. Retry shortly.'), { code: 'MEDIA_VERIFICATION_BUSY' });
+          if (this.pending.size >= 2) throw new MediaVerificationBusyError();
           pending = this.hasher(handle, Number(before.size));
           this.pending.set(key, pending);
           void pending.finally(() => { if (this.pending.get(key) === pending) this.pending.delete(key); }).catch(() => {});

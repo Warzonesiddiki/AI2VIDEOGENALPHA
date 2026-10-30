@@ -57,3 +57,8 @@ test('pilot reading copy stays synchronized with the authored source', async () 
   const copy = await fs.readFile(new URL('../../docs/story/pilot-the-eight-beat-failure.md', import.meta.url), 'utf8');
   assert.ok(copy.includes(PILOT_NARRATION));
 });
+
+test('unscoped story scaffolds do not silently import Ternfall canon into other projects', () => {
+  const result = buildStoryOutline({ workingTitle: 'Night Observatory', logline: 'A researcher must secure a telescope.', characters: ['Amara'], location: 'North observatory' });
+  assert.doesNotMatch(JSON.stringify(result), /Ternfall|\bStill\b|infection|transmission/i);
+});

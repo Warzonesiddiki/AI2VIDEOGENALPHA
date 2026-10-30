@@ -1,14 +1,23 @@
-# PROJECT_SPEC.md — Ternfall Studio (100% Automated Video Pipeline)
+# PROJECT_SPEC.md — Ternfall Studio aspirational product requirements
 
-**Document Version**: 1.0.0  
-**Status**: APPROVED & ACTIVE (Single Source of Truth)  
-**Lead Engineer / Technical Co-Founder**: AI Studio Engine  
-**Product Owner**: Siddiki  
+**Document Version**: 1.0.0
+**Status**: Historical requirements and desired outcomes; not an implementation or release approval
+**Product Owner**: Siddiki
+
+---
+
+## Current implementation status (2026-10-30)
+
+The requirements below preserve the desired product direction; they are **not a description of a completed, approved or zero-compromise system**. The checked-in implementation does not perform automated Flow account generation, synthesized narration, autonomous end-to-end production, Shorts assembly, YouTube upload, or independent editorial/rights review. Public publication and paid-provider operations remain disabled. Account subscriptions, costs, copyright and output quality are not verified by draft planning.
+
+Current capabilities and operating instructions are in [README.md](README.md). The [requirements ledger](docs/requirements-traceability.md) distinguishes partial, unmet and intentionally blocked requirements. See the [fresh audit](docs/research-audit-and-remediation-2026-10-30.md) for evidence and open risks. The local worker can render supplied PNGs and audio and perform measured technical checks, but this does not certify creative quality, rights or release readiness.
+
+The claims and acceptance criteria in sections 1–6 are aspirations, not present-tense facts. Legacy scripts referenced below have been retired; do not run old exports. Human authorization remains mandatory, and an automated approval claim is not a substitute.
 
 ---
 
 ## 1. Goal
-Provide a zero-compromise, 100% automated local-first production studio that produces broadcast-quality, long-form (10–15 min) 24fps animated survival thriller videos (*The Quiet Hours: Ternfall*) ready for direct upload to YouTube. Image and visual asset generation is automated via **Google Flow (`flow.google.com`)** in native 24-frame batches across **3 Pro accounts** at $0.00 billable API cost, while narrative structuring, voiceover, procedural audio design, Foley, signature 8-beat mechanical tension pulse music, and 24fps FFmpeg video rendering are processed locally on the user's machine.
+Provide a zero-compromise, 100% automated local-first production studio that produces broadcast-quality, long-form (10–15 min) 24fps animated survival thriller videos (*The Quiet Hours: Ternfall*) ready for direct upload to YouTube. The desired concept envisages image and visual asset generation via **Google Flow (`flow.google.com`)** in native 24-frame batches across **3 Pro accounts** at $0.00 billable API cost, while narrative structuring, voiceover, procedural audio design, Foley, signature 8-beat mechanical tension pulse music, and 24fps FFmpeg video rendering are processed locally on the user's machine.
 
 ---
 
@@ -80,7 +89,7 @@ Provide a zero-compromise, 100% automated local-first production studio that pro
 ## 5. Non-Goals
 1. **Third-Party Video Editing Suite Integration**: We will NOT require Adobe Premiere, DaVinci Resolve, or Final Cut. All stitching and audio multiplexing is handled natively by local FFmpeg.
 2. **Paid Cloud GPU Video Services**: We will NOT use paid cloud rendering farms (Runway, Sora, Pika). All video rendering is local.
-3. **Public Unattended YouTube Publishing**: Per the repository security contract in `AGENTS.md`, unattended agents will NOT publish directly to YouTube publicly without human review; the system generates the verified private package and ready-to-publish files.
+3. **Public Unattended YouTube Publishing**: Per the repository security contract in `AGENTS.md`, unattended agents will NOT publish directly to YouTube publicly without human review; the system generates the verified private package and ready-to-publish files (not currently implemented).
 
 ---
 
@@ -92,19 +101,20 @@ Provide a zero-compromise, 100% automated local-first production studio that pro
 
 ---
 
-## 7. Tech Constraints
-* **Runtime**: Node.js 22, Express server (`server.ts`), Vite, React 19, TypeScript.
-* **Rendering Engine**: FFmpeg with `libx264`, `aac`, `lavfi`, and `loudnorm` filters.
-* **Storage**: Local-first atomic JSON filesystem under `./data/production_root/projects/{projectId}/`.
-* **Zero Secrets Client-Side**: All tokens and environment variables remain server-side.
+## 7. Technology and present constraints
+
+- Node 22.13+, Express, Vite, React 19 and TypeScript.
+- SQLite is authoritative after import; storage uses scoped document abstractions and targeted optimistic revisions. Atomic JSON is not the current storage contract.
+- Supplied-asset local rendering requires compatible maintained FFmpeg/FFprobe. The feature is technical rendering and QC, not automatic image/audio generation.
+- The server uses a single-operator token for remote binding; this is not multi-user identity or a complete hosted security boundary. Secrets must not be committed or sent to model providers.
+- See the current audit for backup, filesystem, recovery, accessibility, platform and supply-chain limitations.
 
 ---
 
-## 8. Current State Summary
-* **Exists & Verified**: Core 24-frame batch math, 3-account load balancer, Google Flow prompts generator, local audio mix script generator, 24fps FFmpeg stitch script, unit tests (26/26 passing), Express API endpoints, and tabbed Google Flow UI.
-* **Needs Completion for 100% Zero-Touch Automation**:
-  1. Checkpoint/resume state manager for multi-batch generation.
-  2. Integrated in-browser HTML5 video player with 9-beat chapter scrubbing.
-  3. Single-click "Autoproduce Full Master" execution runner in both UI and CLI.
-  4. Pre-flight YouTube Technical QC card (verifying 24fps, -14.0 LUFS, audio sync, and rights clearance).
-  5. Storage usage & disk cleanup manager.
+## 8. Current state and remaining work
+
+**Partially implemented:** project-scoped draft storage and editing; advisory story/canon checks; illustrative batch planning and file verification; supplied-asset local rendering, measured QC, checked playback and segment-level retry.
+
+**Unmet or deliberately disabled:** autonomous provider generation and account management, procedural narration/audio pipeline, 9:16 Shorts production, claims of broadcast/editorial/rights approval, generated publication package, end-to-end autoproduction, spend-grant creation and public/private platform upload. No speed, cost, quality, zero-error or complete security guarantee has been established.
+
+The [traceability ledger](docs/requirements-traceability.md) and [remediation progress](docs/remediation-progress.md) identify evidence and remaining prerequisites. Any future change to disabled behavior requires a separate risk assessment, explicit authorization where required, and appropriate tests.

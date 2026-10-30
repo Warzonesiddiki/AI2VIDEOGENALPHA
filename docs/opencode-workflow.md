@@ -6,8 +6,8 @@ OpenCode is an optional, external CLI agent that can automate routine drafting, 
 
 1. In WSL2 or Linux terminal inside the repository root:
    ```bash
-   npm install -g opencode
    cd ~/ternfall-studio
+   # Install and configure your chosen agent separately after reviewing its source and terms.
    ```
 2. Check that the studio CLI is responding:
    ```bash
@@ -42,13 +42,13 @@ Agents in this repository are instructed by `AGENTS.md` and `.opencode/agents/` 
    npm run studio -- episode check S01E001 --json
    ```
 4. **Draft or Update Scripts**:
-   The agent writes a new version to `./data/production_root/projects/<projectId>/episodes.json` with an incremented version number, leaving the prior version intact.
+   Use `npm run studio -- episode update-script <episode-id> --file <path> --json` to create a draft version. Do not edit JSON or SQLite internals; SQLite is authoritative after import. The command mutates metadata and requires the operator’s request.
 5. **Request Human Editorial Sign-Off**:
-   The agent cannot mark an episode approved without human confirmation.
+   CLI `episode approve` is disabled. A local script review marker is not independent editorial, rights, spend, technical or publication approval.
 
 ## 4. Security & Blocked Actions
 
-Per `opencode.json` and Master Project Rules, the following are strictly blocked:
+`AGENTS.md` prohibits the following. The repository configuration expresses intent but is not proof that a particular external agent/version enforces every restriction:
 - Public publishing to YouTube (strictly human-only via YouTube Studio).
 - Increasing spend caps or self-issuing spend approval grants.
 - Writing outside the authorized `./data/production_root/` folder.
@@ -59,7 +59,8 @@ Per `opencode.json` and Master Project Rules, the following are strictly blocked
 
 - **Spaces in Windows Paths**: Always use Linux-native paths inside WSL (e.g. `/home/user/ternfall-studio`) rather than mounted `/mnt/c/Users/...` for optimal filesystem performance.
 - **Port 3000 In Use**: If port 3000 is occupied, set `PORT=3001` before starting the server.
-- **Permission Denied**: Check permissions on `./data/production_root`:
-  ```bash
-  chmod -R u+rw ./data/production_root
-  ```
+- **Permission Denied**: Inspect the specific path and ownership without recursively changing permissions. Ask the operator before altering production data or its permissions.
+
+## 6. Reviewed project skills
+
+The [skill catalog](../.opencode/skills/README.md) documents the project-specific and pinned upstream skills, licenses, runtime check and limits. Restart an existing OpenCode session after changing configuration. The checked `opencode.json` uses OpenCode 1 permissions; validate its behavior and effective agent rules on the actual installed version. Skills and command globs are not an OS sandbox.

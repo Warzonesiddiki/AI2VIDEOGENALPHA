@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GenerationJob, JobState } from '../types/index.ts';
+import { PublicGenerationJob, JobState } from '../types/index.ts';
 import {
   Film,
   RotateCcw,
@@ -13,7 +13,7 @@ import {
 
 interface JobsQueueViewProps {
   projectId: string;
-  jobs: GenerationJob[];
+  jobs: PublicGenerationJob[];
   onRefreshJobs: () => void;
 }
 
@@ -22,8 +22,8 @@ export const JobsQueueView: React.FC<JobsQueueViewProps> = ({
   jobs,
   onRefreshJobs,
 }) => {
-  const [selectedJob, setSelectedJob] = useState<GenerationJob | null>(null);
-  const [reconcileJob, setReconcileJob] = useState<GenerationJob | null>(null);
+  const [selectedJob, setSelectedJob] = useState<PublicGenerationJob | null>(null);
+  const [reconcileJob, setReconcileJob] = useState<PublicGenerationJob | null>(null);
   const [reconcileEvidence, setReconcileEvidence] = useState('');
 
   const handleTransition = async (jobId: string, targetState: JobState) => {
@@ -98,7 +98,7 @@ export const JobsQueueView: React.FC<JobsQueueViewProps> = ({
           <Film className="w-8 h-8 text-slate-600 mx-auto" />
           <h3 className="text-xs font-semibold text-slate-300">No Jobs in Production Queue</h3>
           <p className="text-[11px] text-slate-500">
-            Rendering, audio synthesis, and autoproduce jobs will appear here with durable state tracking.
+            No historical jobs are recorded. Supplied-asset local renders are shown in the Local Render panel, not this table.
           </p>
         </div>
       ) : (
@@ -251,7 +251,7 @@ export const JobsQueueView: React.FC<JobsQueueViewProps> = ({
             </div>
 
             <div className="text-[11px] text-slate-500">
-              Secrets, OAuth tokens, and sensitive keys are automatically redacted from logs.
+              Log message text is withheld from HTTP responses and stays in local project data. Full diagnostics are available through the operator CLI and local files.
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ import type { ResearchClaim } from '../../src/types/index.ts';
 import { assertIdentifier } from './paths.ts';
 import { assertRevision } from './conflicts.ts';
 import { sanitizeUntrustedResearchContent, validateResearchSourceUrl } from '../../src/core/sources.ts';
+import { publicResearchClaim } from './publicDocuments.ts';
 
 /** Research notes are untrusted data, never an approval or instruction channel. */
 export function validateResearchClaim(projectId: string, input: ResearchClaim): ResearchClaim {
@@ -34,7 +35,5 @@ export function validateResearchClaim(projectId: string, input: ResearchClaim): 
 
 /** No durable review-event service exists yet, including for historical labels. */
 export function unreviewedResearchClaim(claim: ResearchClaim): ResearchClaim {
-  const checkedUrl = claim.sourceUrl ? validateResearchSourceUrl(claim.sourceUrl) : undefined;
-  return { ...claim, sourceUrl: checkedUrl?.isValid ? checkedUrl.sanitizedUrl : undefined, revision: claim.revision ?? 0, humanApproved: false, confidenceScore: 0,
-    verificationStatus: claim.isFictionalLore ? 'fictional_rule' : claim.verificationStatus === 'disputed' ? 'disputed' : 'unverified' };
+  return publicResearchClaim(claim);
 }

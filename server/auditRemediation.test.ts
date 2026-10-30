@@ -124,6 +124,7 @@ test('episode and plan writes require real project/episode identity and leave no
   await assert.rejects(store.saveGoogleFlowPlan(other.id, noEpisode), /episode not found/);
   assert.equal(noEpisode.revision, undefined); assert.equal(draft.revision, 0);
   await store.saveEpisode(other.id, { ...source, projectId: other.id, seriesId: other.activeSeriesId, revision: 0 });
+  noEpisode.sourceEpisodeRevision = (await store.getEpisode(other.id, noEpisode.episodeId))!.revision ?? 0;
   await store.saveGoogleFlowPlan(other.id, noEpisode); assert.equal(noEpisode.revision, 1);
 });
 
@@ -155,4 +156,63 @@ test('independent dispatch processes reread lowered caps and never release rejec
   assert.equal(results.every(result => !result.ok), true);
   assert.equal((await store.listSpendReservations(project)).every(hold => hold.state === 'reserved'), true);
   assert.equal((await store.listSpendEvents(project)).length, 2);
+});
+
+test('doctor probes configured media binaries and labels provider prices as unverified', async t => {
+  const { root, store } = await fixture(t);
+  const executable = path.join(root, 'fixture-media');
+  await fs.writeFile(executable, '#!/bin/sh\nprintf "fixture-media version 1\\n"\n', { mode: 0o700 });
+  const oldFfmpeg = process.env.FFMPEG_PATH, oldFfprobe = process.env.FFPROBE_PATH;
+  process.env.FFMPEG_PATH = executable; process.env.FFPROBE_PATH = executable;
+  t.after(() => {
+    if (oldFfmpeg === undefined) delete process.env.FFMPEG_PATH; else process.env.FFMPEG_PATH = oldFfmpeg;
+    if (oldFfprobe === undefined) delete process.env.FFPROBE_PATH; else process.env.FFPROBE_PATH = oldFfprobe;
+  });
+  const result = await store.runDoctorDiagnostics();
+  assert.equal(result.ffmpeg.installed, true); assert.equal(result.ffmpeg.ffprobeAvailable, true);
+  assert.match(result.ffmpeg.version!, /^fixture-media version 1/);
+  assert.ok(result.providers.every(provider => /unverified|disabled|not implemented/i.test(provider.estimatedCostBasis)));
+  assert.equal(result.youtubeOAuth.tokenProtected, false);
+});
+
+test('doctor write probe never overwrites a predictable preexisting symlink target', async t => {
+  const { root, store } = await fixture(t);
+  const sentinel = path.join(root, 'protected-fixture.txt');
+  await fs.writeFile(sentinel, 'preserve this fixture');
+  const oldProbe = path.join(root, '.test_write_123456');
+  try { await fs.symlink(sentinel, oldProbe); }
+  catch (error: any) {
+    if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code)) { t.skip('Symlink creation requires Windows privileges'); return; }
+    throw error;
+  }
+  const clock = t.mock.method(Date, 'now', () => 123456);
+  try { await store.runDoctorDiagnostics(); } finally { clock.mock.restore(); }
+  assert.equal(await fs.readFile(sentinel, 'utf8'), 'preserve this fixture');
+  assert.equal(await fs.readlink(oldProbe), sentinel);
+});
+
+test('concurrent doctor probes use independent temporary files and clean them up', async t => {
+  const { root, store } = await fixture(t);
+  const clock = t.mock.method(Date, 'now', () => 123456);
+  let results;
+  try { results = await Promise.all(Array.from({ length: 6 }, () => store.runDoctorDiagnostics())); }
+  finally { clock.mock.restore(); }
+  assert.ok(results.every(result => result.storage.isWritable));
+  assert.equal((await fs.readdir(root)).filter(name => name.startsWith('.doctor-probe-') || name.startsWith('.test_write_')).length, 0);
+});
+
+test('doctor reports temporary-probe cleanup failure without deleting unrelated files', async t => {
+  const { root, store } = await fixture(t);
+  const unlink = fs.unlink;
+  const mocked = t.mock.method(fs, 'unlink', async (file: Parameters<typeof fs.unlink>[0]) => {
+    if (String(file).includes('.doctor-probe-')) throw Object.assign(new Error('fixture cleanup failure'), { code: 'EACCES' });
+    return unlink(file);
+  });
+  let result;
+  try { result = await store.runDoctorDiagnostics(); } finally { mocked.mock.restore(); }
+  assert.equal(result.storage.isWritable, true);
+  assert.ok(result.remediationSteps.some(message => /could not remove.*temporary write probe/i.test(message)));
+  const remaining = (await fs.readdir(root)).filter(name => name.startsWith('.doctor-probe-'));
+  assert.equal(remaining.length, 1);
+  await fs.unlink(path.join(root, remaining[0]));
 });

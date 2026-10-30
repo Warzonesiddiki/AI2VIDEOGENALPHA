@@ -1,16 +1,34 @@
 > **2026-10-29 audit correction:** The checked items below are a historical ledger, not verified completion evidence. Several implementations were simulated. See `docs/remediation-progress.md` for current verified status. Production execution/approval endpoints are now intentionally fail-closed until their real services exist.
 
+## Current unresolved priorities (2026-10-30)
+
+- [x] Design an explicitly authorized offline procedure for ambiguous/legacy/foreign worker claims: `studio media adjudicate`
+  (CLI-only, dual attestation plus evidence note, full claim recorded as history) resolves incomparable claims; non-Linux
+  cross-process recovery and orphan cleanup remain open.
+- [ ] Complete successful-response data minimization, nested schema validation and privacy review across APIs (remaining: untested response shapes; write-side policy caps and trusted-caller unknown-key rejection are done — every document write is model-clean and every numeric field has a documented ceiling); address continuous post-verification asset changes and remaining concurrency limits.
+- [x] Project settings/project HTTP success payloads through validated allowlists; preserve legacy provider data on settings saves, reject project identity mismatch, and show zero/unknown caps truthfully in the browser.
+- [x] Project production-record listings (jobs, YouTube packages, autoproduce runs, spend grants) through fail-closed browser projections: drop paths, raw diagnostics and provider telemetry, replace log text with fixed statements, and fail malformed records closed without leaking contents.
+- [x] Project episode/series/research reads and mutation responses through recursive document schemas; reject unknown caller keys, preserve stored legacy keys across edits (including matched nested items), and keep legacy script versions without fabricated values.
+- [x] Guard revision advancement at the safe-integer boundary for exercised project, settings, series, episode, Flow, research and production records; test rollback and Flow's two-commit recheck.
+- [x] Use typed, fixed public errors for exercised project, episode, arc, settings, series, research, outline, Flow and local-render mutations; regression-test forged codes and injected failures.
+- [x] Snapshot settings, series and research inputs before validation and asynchronous persistence; test same-process mutation of nested and protected fields.
+- [x] Clear stale Flow evidence and block plan changes when a post-mutation reload fails; exercise the failure with real synthetic frames in Chromium.
+- [ ] Complete storage schemas/import review, full-size backup and recovery rehearsal, and reviewed live promotion/rollback.
+- [ ] Validate hosted CI, maintained native media binaries, supported platforms, accessibility and deployment security; a passing local suite is not release approval.
+- [ ] Build separately authorized provider generation, independent human review/rights approval and publication workflows rather than re-enabling retired simulations.
+
 # TASKS.md — Project Ledger & Live Execution Tracker
 
-**Single Source of Truth Reference**: `PROJECT_SPEC.md`  
-**Universal Definition of Done**:
-- [x] All states handled: loading, empty, error, success, and edge/offline states
-- [x] Every input validated (client AND server where applicable)
-- [x] Every external call has error handling
-- [x] Responsive layout at desktop/laptop
-- [x] Basic accessibility: labels, keyboard nav, visible focus, contrast
-- [x] Nothing sensitive exposed client-side
-- [x] Verified by ACTUALLY RUNNING IT (unit tests + browser verification)
+**Aspirational reference**: `PROJECT_SPEC.md`; see the current traceability and remediation documents for implemented capabilities.
+
+**Universal Definition of Done — targets, not yet established**:
+- [ ] All states handled: loading, empty, error, success, and edge/offline states
+- [ ] Every input validated (client AND server where applicable)
+- [ ] Every external call has error handling
+- [ ] Responsive layout at desktop/laptop
+- [ ] Basic accessibility: labels, keyboard nav, visible focus, contrast
+- [ ] Nothing sensitive exposed client-side
+- [ ] Verified across intended workflows by actually running unit tests and browser checks
 
 ---
 

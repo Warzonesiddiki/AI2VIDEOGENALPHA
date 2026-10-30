@@ -121,8 +121,13 @@ test('dead worker claims recover as interrupted and retry in a new attempt', asy
   await assert.rejects(promisify(execFile)(process.execPath, ['--import', 'tsx', 'server/fixtures/media-crash-worker.ts'], {
     cwd: process.cwd(), env: { ...process.env, TEST_MEDIA_CRASH_ROOT: root },
   }), (error: any) => error.code === 19);
-  assert.equal(service.get(project, queued.id)?.state, 'running');
+  const claimed = service.get(project, queued.id);
+  assert.equal(claimed?.state, 'running');
   assert.equal(await service.runNext(), null); // another worker cannot steal a claim
+  if (!claimed?.ownerDomain) {
+    assert.equal(service.recoverInterrupted(), 0);
+    t.skip('Cross-process recovery requires a comparable Linux boot and PID namespace'); return;
+  }
   assert.equal(service.recoverInterrupted(), 1);
   assert.equal(service.get(project, queued.id)?.state, 'interrupted');
   assert.throws(() => service.mediaPath(project, queued.id));
@@ -242,7 +247,12 @@ test('abrupt worker death after a segment commit preserves reusable work', async
   await assert.rejects(promisify(execFile)(process.execPath, ['--import', 'tsx', 'server/fixtures/media-crash-worker.ts'], {
     cwd: process.cwd(), env: { ...process.env, TEST_MEDIA_CRASH_ROOT: root, TEST_CRASH_AFTER_SEGMENT: 'true', FFMPEG_PATH: testBinaries.ffmpeg, FFPROBE_PATH: testBinaries.ffprobe },
   }), (error: any) => error.code === 19);
-  assert.ok((service.get(project, queued.id)?.checkpoints?.length ?? 0) >= 1);
+  const claimed = service.get(project, queued.id);
+  assert.ok((claimed?.checkpoints?.length ?? 0) >= 1);
+  if (!claimed?.ownerDomain) {
+    assert.equal(service.recoverInterrupted(), 0);
+    t.skip('Cross-process recovery requires a comparable Linux boot and PID namespace'); return;
+  }
   assert.equal(service.recoverInterrupted(), 1); service.retry(project, queued.id);
   const completed = await service.runNext(); assert.equal(completed?.state, 'succeeded', completed?.error);
   assert.ok((completed?.progress?.reusedSegments ?? 0) >= 1);
@@ -283,7 +293,7 @@ test('checkpoint purge retains sources, verified export and idempotency; refuses
   assert.equal(response.status, 200);
   const purged = (await response.json()).data;
   assert.equal(purged.state, 'succeeded'); assert.equal(purged.checkpoints, undefined);
-  assert.deepEqual(purged.retiredCheckpointTokens, []); assert.ok(purged.checkpointsPurgedAt);
+  assert.equal(purged.retiredCheckpointCount, 0); assert.equal(purged.retiredCheckpointTokens, undefined); assert.ok(purged.checkpointsPurgedAt);
   await assert.rejects(fs.stat(checkpoint.path), { code: 'ENOENT' });
   assert.deepEqual(await fs.readFile(output), before);
   assert.ok((await fs.stat(path.join(frames, 'frame_00001.png'))).isFile());
@@ -405,4 +415,64 @@ test('HTTP playback verifies bytes, supports ranges/HEAD and refuses mutated exp
   await fs.writeFile(file, original);
   const repaired = await fetch(url, { headers: { Range: 'bytes=0-7', 'If-Range': etag! } });
   assert.equal(repaired.status, 206); assert.deepEqual(Buffer.from(await repaired.arrayBuffer()), original.subarray(0, 8));
+});
+
+test('rejected work-path setup fails the claim and releases the worker instead of stranding the queue', async t => {
+  const { root, service } = await fixture(t, false);
+  const target = path.join(root, 'untouched_work_target');
+  const workLink = path.join(root, 'projects', project, 'local_work');
+  await fs.mkdir(target);
+  try { await fs.symlink(target, workLink, 'dir'); }
+  catch (error: any) {
+    if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code)) { t.skip('Symlink creation requires Windows privileges'); return; }
+    throw error;
+  }
+  const job = service.enqueue(request('rejected_work_setup'));
+  const failed = await service.runNext();
+  assert.equal(failed?.state, 'failed');
+  assert.match(failed?.error ?? '', /symlink/);
+  assert.equal(failed?.qc, undefined);
+  assert.equal(service.get(project, job.id)?.state, 'failed');
+  assert.equal(service.recoverInterrupted(), 0);
+  assert.deepEqual(await fs.readdir(target), []);
+  await fs.unlink(workLink);
+  // A second claim must be possible; use a bounded failure rather than real media.
+  t.mock.method(service as any, 'render', async () => { throw new Error('second fixture failed normally'); });
+  service.enqueue(request('following_setup_failure'));
+  assert.equal((await service.runNext())?.state, 'failed');
+  assert.doesNotThrow(() => service.close());
+});
+
+test('a failed terminal-state write can be recovered after this worker has actually stopped', async t => {
+  const { service } = await fixture(t, false);
+  const job = service.enqueue(request('terminal_write_failure'));
+  t.mock.method(service as any, 'render', async () => { throw new Error('fixture render failure'); });
+  const realChange = (service as any).change;
+  const change = t.mock.method(service as any, 'change', function (this: unknown, ...args: unknown[]) {
+    change.mock.restore();
+    throw new Error('fixture transient metadata failure');
+  });
+  await assert.rejects(service.runNext(), /recovery is required/);
+  assert.equal(service.get(project, job.id)?.state, 'running');
+  assert.doesNotThrow(() => service.close());
+  assert.equal(service.recoverInterrupted(), 1);
+  assert.equal(service.get(project, job.id)?.state, 'interrupted');
+  assert.equal(service.recoverInterrupted(), 0);
+  service.retry(project, job.id);
+  assert.equal((await service.runNext())?.state, 'failed');
+  assert.equal(typeof realChange, 'function');
+});
+
+test('recovery never treats an actively running same-process worker as abandoned', async t => {
+  const { service } = await fixture(t, false);
+  let begin!: () => void, finish!: () => void;
+  const started = new Promise<void>(resolve => { begin = resolve; });
+  const release = new Promise<void>(resolve => { finish = resolve; });
+  t.mock.method(service as any, 'render', async () => { begin(); await release; throw new Error('fixture complete'); });
+  const job = service.enqueue(request('still_active'));
+  const running = service.runNext();
+  await started;
+  assert.equal(service.recoverInterrupted(), 0);
+  assert.equal(service.get(project, job.id)?.state, 'running');
+  finish(); assert.equal((await running)?.state, 'failed');
 });

@@ -14,11 +14,13 @@ import {
   Key,
   Check,
 } from 'lucide-react';
-import { SpendApprovalGrant, EpisodeCard } from '../types/index.ts';
+import { PublicSpendGrant, EpisodeCard } from '../types/index.ts';
 
 interface SettingsViewProps {
   projectId: string;
 }
+
+const timezoneChoices = ['Asia/Kolkata', 'UTC', 'America/New_York', 'America/Los_Angeles', 'Europe/London'];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
   const [settings, setSettings] = useState<any>(null);
@@ -29,14 +31,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
   const generation = useRef(0);
 
   // Spend Grants Management
-  const [spendGrants, setSpendGrants] = useState<SpendApprovalGrant[]>([]);
+  const [spendGrants, setSpendGrants] = useState<PublicSpendGrant[]>([]);
   const [episodes, setEpisodes] = useState<EpisodeCard[]>([]);
   const [newGrantAmount, setNewGrantAmount] = useState('25.00');
   const [newGrantEpisode, setNewGrantEpisode] = useState('all');
   const [newGrantHours, setNewGrantHours] = useState('24');
   const [isMinting, setIsMinting] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [mintedGrant, setMintedGrant] = useState<SpendApprovalGrant | null>(null);
+  const [mintedGrant, setMintedGrant] = useState<PublicSpendGrant | null>(null);
 
   const loadSpendGrants = async () => {
     try {
@@ -209,54 +211,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
             <span>Atomic Budget Caps (USD)</span>
           </h2>
           <p className="text-slate-400 text-[11px]">
-            Read-only configured caps. Budget editing and paid execution are disabled pending operator-only approval integration.
+            Read-only configured caps. Unavailable values require local settings review; budget editing and paid execution are disabled pending operator-only approval integration.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="text-slate-400 font-medium block mb-1">Per-Run Hard Cap</label>
+              <label htmlFor="per-run-cap" className="text-slate-400 font-medium block mb-1">Per-Run Hard Cap</label>
               <input
+                id="per-run-cap"
                 type="number"
                 disabled
-                value={settings.budgetCaps?.perRunCapUsd || 25}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    budgetCaps: { ...settings.budgetCaps, perRunCapUsd: parseFloat(e.target.value) || 0 },
-                  })
-                }
+                value={settings.budgetCaps?.perRunCapUsd ?? ''}
+                placeholder="Unavailable"
                 className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded text-slate-100 font-mono"
               />
             </div>
 
             <div>
-              <label className="text-slate-400 font-medium block mb-1">Per-Episode Hard Cap</label>
+              <label htmlFor="per-episode-cap" className="text-slate-400 font-medium block mb-1">Per-Episode Hard Cap</label>
               <input
+                id="per-episode-cap"
                 type="number"
                 disabled
-                value={settings.budgetCaps?.perEpisodeCapUsd || 85}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    budgetCaps: { ...settings.budgetCaps, perEpisodeCapUsd: parseFloat(e.target.value) || 0 },
-                  })
-                }
+                value={settings.budgetCaps?.perEpisodeCapUsd ?? ''}
+                placeholder="Unavailable"
                 className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded text-slate-100 font-mono"
               />
             </div>
 
             <div>
-              <label className="text-slate-400 font-medium block mb-1">Monthly Project Cap</label>
+              <label htmlFor="monthly-cap" className="text-slate-400 font-medium block mb-1">Monthly Project Cap</label>
               <input
+                id="monthly-cap"
                 type="number"
                 disabled
-                value={settings.budgetCaps?.monthlyCapUsd || 350}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    budgetCaps: { ...settings.budgetCaps, monthlyCapUsd: parseFloat(e.target.value) || 0 },
-                  })
-                }
+                value={settings.budgetCaps?.monthlyCapUsd ?? ''}
+                placeholder="Unavailable"
                 className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded text-slate-100 font-mono"
               />
             </div>
@@ -271,10 +261,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
           </h2>
           <div className="max-w-md">
             <select
-              value={settings.productionTimezone || 'UTC'}
+              aria-label="Production timezone"
+              value={settings.productionTimezone ?? ''}
               onChange={(e) => setSettings({ ...settings, productionTimezone: e.target.value })}
               className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded text-slate-200 font-mono"
             >
+              <option value="" disabled>Unavailable — choose a timezone</option>
+              {settings.productionTimezone && !timezoneChoices.includes(settings.productionTimezone) && <option value={settings.productionTimezone}>{settings.productionTimezone} (saved)</option>}
               <option value="Asia/Kolkata">Asia/Kolkata (IST, UTC+5:30)</option>
               <option value="UTC">UTC (Universal Coordinated Time)</option>
               <option value="America/New_York">America/New_York (EST/EDT)</option>

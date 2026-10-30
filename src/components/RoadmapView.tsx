@@ -79,6 +79,8 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({ projectId, onExpandArc
     }
   };
 
+  if (projectId !== 'proj_ternfall_01') return <div className="max-w-3xl space-y-3"><h1 className="text-2xl font-bold">No roadmap for this project</h1><p className="text-sm text-slate-300">The built-in roadmap belongs only to the original Ternfall project. It cannot be expanded into another project. Create episode cards in the Episode Board instead.</p></div>;
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -92,7 +94,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({ projectId, onExpandArc
               100-Arc Backbone & Season Map
             </h1>
             <p className="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
-              10 Seasons · 100 Ten-Episode Arcs = 1,000 planned episode slots. Expand arcs in small, continuity-checked batches (max 20 cards per batch). Never mass-generate unreviewed scripts.
+              10 Seasons · 100 Ten-Episode Arcs = 1,000 planned episode slots. Expand arcs into unreviewed draft cards (max 20 cards per batch). Never mass-generate unreviewed scripts.
             </p>
           </div>
 
@@ -215,7 +217,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({ projectId, onExpandArc
               Expand Arc #{expandArcNumber} into Episode Cards
             </h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Per Master Project Rules, roadmap expansion is bounded to a maximum of 20 cards per batch to maintain distinct storylines, continuity integrity, and budget caps.
+              Per Master Project Rules, roadmap expansion is bounded to a maximum of 20 cards per batch to bound each write; it does not establish distinctness, continuity integrity or budget approval.
             </p>
 
             <div className="space-y-2">

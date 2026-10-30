@@ -11,6 +11,6 @@ export function settingsView(settings: Record<string, unknown>, events: DataNoti
       delete descriptor.checkedDate;
       return [key, { ...descriptor, verificationStatus: 'unverified' }];
     })) : {};
-  return { ...settings, providerConfigs, revision: settings.revision ?? 0, dataNoticeVersion: DATA_NOTICE_VERSION,
+  return { ...settings, providerConfigs, revision: settings.revision === undefined ? 0 : settings.revision, dataNoticeVersion: DATA_NOTICE_VERSION,
     dataNoticeAccepted: !!accepted, noticeAcceptedDate: accepted ? last.recordedAt : undefined };
 }

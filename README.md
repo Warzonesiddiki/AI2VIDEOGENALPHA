@@ -124,9 +124,13 @@ npm audit --audit-level=high
 git diff --check
 ```
 
-**CI activation:** this PR intentionally excludes active GitHub Actions workflows because the GitHub connection lacks workflow-write permission. The proposed configuration is preserved in [docs/ci-workflow.example.yml](docs/ci-workflow.example.yml). An authorized maintainer can review and install it separately; automated CI is not enabled by this template.
+**CI:** a [validation workflow](.github/workflows/validation.yml) is present in the working tree for Linux/Node 22.13 and 22.22, with read-only permissions and pinned action commits. It has not run on GitHub yet; an authorized maintainer must review and push it (workflow permissions may be required). Hosted runs consume GitHub Actions minutes and download Chromium/Linux dependencies for the isolated browser smoke; no deployment or publication step is included.
 
-The opt-in long media fixture is not part of every routine run. Passing tests/build/audit is not browser, Windows, native-decoder, editorial, provider or production-readiness certification. See the audit/progress documents for measured totals and exclusions.
+The opt-in long media fixture is not part of every routine run. To run the isolated browser smoke test, install a compatible Chromium separately and set `CHROMIUM_PATH` to its absolute path before `npm run test:browser`; the test creates and removes a temporary data root and does not download a browser. Sandbox containers may require additional library configuration. A browser smoke is not a complete accessibility or real-device review. Passing tests/build/audit is not Windows, native-decoder, editorial, provider or production-readiness certification. See the audit/progress documents for measured totals and exclusions.
+
+### Optional agent skills
+
+The [project skill catalog](.opencode/skills/README.md) includes 20 domain-specific skills and 12 pinned upstream skills. OpenCode 1.19.5 discovered and individually loaded all 32 in isolated checks; no runtime was installed globally. Verify the installed runtime and effective permissions before use. Skills and permission globs are guidance, not an OS sandbox, provider consent or release authorization. Read [AGENTS.md](AGENTS.md) and the [OpenCode workflow](docs/opencode-workflow.md) first.
 
 ## Repository map
 
@@ -153,11 +157,14 @@ Ternfall Studio
 
 Read [AGENTS.md](AGENTS.md) before automation. No public release without human authorization; no agent-created/widened spend grants; use typed CLI for project data and respect root containment.
 
-SQLite metadata backup is **not a complete media archive or guided restore solution**. Keep independent backups of original assets and exports; do not assume copying a live WAL database is a consistent backup.
+The [offline backup and isolated restore workflow](docs/backup-and-restore.md) snapshots SQLite plus production-root files after all writers are stopped; it verifies hashes and stages a new copy without overwriting live data. Its local bundle shares the source disk: an operator must securely keep and verify independent copies. It does not automatically promote or roll back a restore. `studio project backup` remains metadata-only.
 
-Current gaps include complete model schemas/import invariants, owner/orphan recovery, disk guarantees, hostile/concurrent filesystem playback mutation, browser/platform testing, staged restore, deployment/rate/session controls and durable review provenance. Do not expose this as an unattended multi-user service.
+Current gaps include complete model schemas/import invariants, ambiguous/foreign-owner and orphan recovery, disk guarantees, hostile/concurrent filesystem playback mutation, full-size restore rehearsal, browser/platform testing, deployment/rate/session controls and durable review provenance. Exercised Flow, local-render and editorial/configuration mutation errors use fixed public messages; successful response data and untested paths still need comprehensive privacy review. Do not expose this as an unattended multi-user service.
 
-- [Deep audit and current dispositions](docs/deep-re-audit-2026-10-30.md)
+- [Fresh research audit and remaining risks](docs/research-audit-and-remediation-2026-10-30.md)
+- [Baseline independent audit](docs/independent-audit-2026-10-30.md)
+- [Earlier deep audit and historical dispositions](docs/deep-re-audit-2026-10-30.md)
+- [Current requirements traceability](docs/requirements-traceability.md)
 - [Remediation progress](docs/remediation-progress.md)
 - [Pending tasks](TASKS.md)
 - [Consent and dispatch policy](docs/consent-and-dispatch-policy.md)

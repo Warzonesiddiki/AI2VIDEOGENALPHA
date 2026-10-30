@@ -109,14 +109,15 @@ test('legacy placeholder render-script endpoints return no executable substitute
 
 test('API rejects unsafe identifiers and excessive workload before storage access', async t => {
   const url = await api(t);
-  for (const [endpoint, body] of [
-    ['projects/bad%24id/episodes', {}],
-    ['projects/p/flow/plan/e', { durationSeconds: 10000000 }],
-    ['projects/p/flow/plan/e', { fps: '24' }],
-    ['projects/p/flow/plan/e', { episodeId: '../escape' }],
+  for (const [endpoint, body, code] of [
+    ['projects/bad%24id/episodes', {}, 'INVALID_IDENTIFIER'],
+    ['projects/p/flow/plan/e', { durationSeconds: 10000000 }, 'FLOW_INVALID_DURATION'],
+    ['projects/p/flow/plan/e', { fps: '24' }, 'FLOW_INVALID_FPS'],
+    ['projects/p/flow/plan/e', { episodeId: '../escape' }, 'INVALID_IDENTIFIER'],
   ] as const) {
     const response = await fetch(`${url}/api/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    assert.equal(response.status, 400);
+    assert.equal(response.status, 400); assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal((await response.json()).code, code);
   }
 });
 
@@ -156,4 +157,39 @@ test('retired CLI stitch rejects save and stdout modes without script files', as
   }
   await visit(cwd);
   assert.ok(!files.some(file => /\.(?:sh|bat|js)$/.test(file)), files.join(', '));
+});
+
+test('the legacy in-browser pseudo-CLI fails closed without invoking storage', async t => {
+  const { storage } = await import('./storage.ts');
+  t.mock.method(storage, 'getEpisode', async () => { throw new Error('fixture: storage should not be called'); });
+  t.mock.method(storage, 'listCanonEvents', async () => { throw new Error('fixture: storage should not be called'); });
+  t.mock.method(storage, 'runDoctorDiagnostics', async () => { throw new Error('fixture: storage should not be called'); });
+  const url = await api(t);
+  for (const command of ['studio episode approve S01E001 --json', 'studio continuity add --json', 'studio doctor --json', 'studio project list --json']) {
+    const response = await fetch(`${url}/api/cli/execute`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command }) });
+    assert.equal(response.status, 410, command); const body = await response.json();
+    assert.equal(body.ok, false); assert.equal(body.code, 'RETIRED'); assert.equal(body.output, undefined);
+  }
+});
+
+test('outline API requires explicit story context instead of inventing a Ternfall setting', async t => {
+  const { geminiAdapter } = await import('./geminiAdapter.ts'); let captured: any;
+  t.mock.method(geminiAdapter, 'generateOutline', async (params: Parameters<typeof geminiAdapter.generateOutline>[0]) => {
+    captured = params;
+    return { success: true, isAiGenerated: false, data: { beats: [] }, providerNotice: 'fixture' };
+  });
+  const url = await api(t);
+  const submit = (body: unknown) => fetch(`${url}/api/generate/outline`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const missing = await submit({ workingTitle: 'Original observatory', logline: 'An observer tests a signal.' });
+  assert.equal(missing.status, 400); assert.equal(captured, undefined);
+  const explicit = { workingTitle: 'Original observatory', logline: 'An observer tests a signal.', characters: ['Amara'], location: 'Observatory' };
+  assert.equal((await submit(explicit)).status, 200); assert.deepEqual(captured, { ...explicit, canonNotes: undefined });
+});
+
+test('browser cross-site writes are rejected even when Origin is absent', async t => {
+  const url = await api(t); const target = `${url}/api/pacing/calculate`;
+  const send = (site?: string) => fetch(target, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(site ? { 'Sec-Fetch-Site': site } : {}) }, body: JSON.stringify({ text: 'fixture' }) });
+  for (const site of ['cross-site', 'same-site']) assert.equal((await send(site)).status, 403, site);
+  assert.equal((await send('same-origin')).status, 200);
+  assert.equal((await send()).status, 200); // Non-browser CLI clients may omit Fetch Metadata.
 });

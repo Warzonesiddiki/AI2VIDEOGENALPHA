@@ -1,3 +1,5 @@
+> **Historical concept, not an operational or safety guarantee (2026-10-30):** this document contains unverified proposals and absolute claims about generation, continuity, performance and release safety. Automated generation, provider orchestration and publishing are not implemented. Do not execute legacy exports or assume any human click makes a release safe. Use [README](../README.md), the [current audit](research-audit-and-remediation-2026-10-30.md) and [AGENTS.md](../AGENTS.md) for actual boundaries.
+
 # Ternfall Studio — The Zero-Compromise Daily Production Blueprint
 ## How to Produce 1 Studio-Quality 10-Minute Animated Thriller Daily on a Low-End PC with Google Flow
 

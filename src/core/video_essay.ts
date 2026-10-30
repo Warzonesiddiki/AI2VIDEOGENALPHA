@@ -467,144 +467,10 @@ export const COLOR_GRADING_PRESETS: ColorGradingPreset[] = [
 ];
 
 /**
- * Generates the complete, zero-flaw Windows Batch (.bat) and Linux Bash (.sh)
- * FFmpeg rendering scripts pre-tuned for the user's ThinkPad T14 (MX330 NVENC).
+ * Retired: the old scripts fabricated placeholders and unverified success.
  */
-export function generateThinkPadT14RenderScripts(
-  episode: VideoEssayEpisode,
-  colorGradeId: string = 'fincher_nordic'
-): {
-  windowsBat: string;
-  linuxSh: string;
-  singleShotExample: string;
-} {
-  const grade = COLOR_GRADING_PRESETS.find((g) => g.id === colorGradeId) || COLOR_GRADING_PRESETS[0];
-
-  const manifestEntries = episode.slides
-    .map((s) => {
-      const numPad = String(s.slideNumber).padStart(2, '0');
-      return `echo file 'data/stills/slide_${numPad}.png' >> "%~dp0slides_manifest.txt"
-echo duration ${s.durationSeconds} >> "%~dp0slides_manifest.txt"`;
-    })
-    .join('\n');
-
-  const windowsBat = `@echo off
-REM ==============================================================================
-REM TERNFALL STUDIO - KINETIC VIDEO ESSAY RENDER ENGINE (ThinkPad T14 / MX330 NVENC)
-REM Hardware: Intel i7-10510U, 20GB RAM, NVIDIA GeForce MX330 (Pascal NVENC)
-REM Grade Profile: ${grade.name} (${grade.description})
-REM Loudness Spec: YouTube Standard EBU R128 (-14 LUFS, -1.5dB True Peak)
-REM Output: 1080p 25fps Broadcast Cinema Master (Sub-90s Total Render)
-REM Estimated Credit Cost: $0.00 (Zero Credits)
-REM ==============================================================================
-
-echo [Ternfall Studio] Initializing NVENC Video Essay Engine for %~dp0...
-mkdir "%~dp0output" 2>nul
-mkdir "%~dp0data\\stills" 2>nul
-mkdir "%~dp0audio" 2>nul
-
-REM Auto-generate slides_manifest.txt if missing
-if not exist "%~dp0slides_manifest.txt" (
-    echo [MANIFEST] Generating slides_manifest.txt for ${episode.totalSlides} slides...
-    del "%~dp0slides_manifest.txt" 2>nul
-${manifestEntries}
-    echo file 'data/stills/slide_${String(episode.totalSlides).padStart(2, '0')}.png' >> "%~dp0slides_manifest.txt"
-)
-
-REM Verify stills exist; if missing, generate temporary 1080p atmospheric frames so render never crashes
-for /L %%i in (1,1,${episode.totalSlides}) do (
-    set "PAD=0%%i"
-    set "NUM=!PAD:~-2!"
-    if not exist "%~dp0data\\stills\\slide_!NUM!.png" (
-        ffmpeg -y -f lavfi -i "color=c=0x0a1d22:s=1920x1080:d=1" -frames:v 1 "%~dp0data\\stills\\slide_!NUM!.png" -loglevel error
-    )
-)
-
-echo [1/4] Checking NVIDIA NVENC Hardware Acceleration...
-ffmpeg -hide_banner -encoders | findstr "h264_nvenc" >nul
-if %ERRORLEVEL% NEQ 0 (
-    echo [WARN] NVENC not detected, falling back to Intel QuickSync/libx264...
-    set VCODEC=libx264 -preset veryfast -crf 20
-) else (
-    echo [OK] NVIDIA GeForce MX330 NVENC Detected. Using Hardware Acceleration.
-    set VCODEC=h264_nvenc -preset p4 -rc:v vbr -b:v 8M -maxrate 12M -bufsize 16M
-)
-
-echo [2/4] Assembling ${episode.totalSlides} Illustrated Slides with Ken Burns Drift & 35mm ${grade.name}...
-
-ffmpeg -y ^
-  -f concat -safe 0 -i "%~dp0slides_manifest.txt" ^
-  -i "%~dp0audio/narration_master.wav" ^
-  -i "%~dp0audio/sub_bass_pulse_55hz.wav" ^
-  -filter_complex ^
-  "[0:v]${grade.ffmpegFilter}[vgraded]; ^
-   [1:a]volume=1.0,highpass=f=80[vocal]; ^
-   [2:a]volume=0.35,lowpass=f=120[sub]; ^
-   [vocal][sub]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-14:TP=-1.5:LRA=11[aout]" ^
-  -map "[vgraded]" -map "[aout]" ^
-  -c:v %VCODEC% ^
-  -c:a aac -b:a 192k -ar 48000 ^
-  -pix_fmt yuv420p ^
-  -movflags +faststart ^
-  "%~dp0output/${episode.episodeId}_video_essay_master.mp4"
-
-if %ERRORLEVEL% EQU 0 (
-    echo ==============================================================================
-    echo [SUCCESS] Episode ${episode.episodeId} Master Rendered Successfully!
-    echo Location: %~dp0output\\${episode.episodeId}_video_essay_master.mp4
-    echo ==============================================================================
-) else (
-    echo [ERROR] Render failed. Check FFmpeg logs.
-)
-pause
-`;
-
-  const linuxSh = `#!/usr/bin/env bash
-# ==============================================================================
-# TERNFALL STUDIO - KINETIC VIDEO ESSAY RENDER ENGINE (Linux / Mac / WSL)
-# Hardware Profile: NVIDIA GeForce MX330 (NVENC) / Intel i7-10510U
-# ==============================================================================
-set -euo pipefail
-
-OUTPUT_DIR="./output"
-mkdir -p "$OUTPUT_DIR"
-
-if ffmpeg -hide_banner -encoders | grep -q "h264_nvenc"; then
-  echo "[OK] NVIDIA NVENC Detected. Using GPU encoding."
-  VCODEC="h264_nvenc -preset p4 -rc:v vbr -b:v 8M"
-else
-  echo "[INFO] Using CPU libx264 fast profile."
-  VCODEC="libx264 -preset veryfast -crf 20"
-fi
-
-ffmpeg -y \\
-  -f concat -safe 0 -i "slides_manifest.txt" \\
-  -i "audio/narration_master.wav" \\
-  -i "audio/sub_bass_pulse_55hz.wav" \\
-  -filter_complex "[1:a]volume=1.0[vocal]; [2:a]volume=0.35,lowpass=f=120[sub]; [vocal][sub]amix=inputs=2:duration=first[aout]" \\
-  -map 0:v -map "[aout]" \\
-  -c:v $VCODEC \\
-  -c:a aac -b:a 192k \\
-  -pix_fmt yuv420p \\
-  "$OUTPUT_DIR/${episode.episodeId}_video_essay_master.mp4"
-
-echo "[SUCCESS] Video essay master created at: $OUTPUT_DIR/${episode.episodeId}_video_essay_master.mp4"
-`;
-
-  const singleShotExample = `ffmpeg -y \\
-  -loop 1 -t 15 -i "data/stills/slide_01_basin_gauge.png" \\
-  -stream_loop -1 -i "assets/overlays/rain_loop_1080p.mov" \\
-  -i "audio/narration_slide_01.wav" \\
-  -filter_complex "\\
-    [0:v]scale=8000x4500,zoompan=z='min(zoom+0.0008,1.20)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=375:s=1920x1080:fps=25[bg]; \\
-    [1:v]scale=1920:1080,colorchannelmixer=aa=0.35[rain]; \\
-    [bg][rain]overlay=shortest=1[v]" \\
-  -map "[v]" -map 2:a \\
-  -c:v h264_nvenc -preset p4 -b:v 8M \\
-  -c:a aac -b:a 192k \\
-  "output/slide_01_cinematic.mp4"`;
-
-  return { windowsBat, linuxSh, singleShotExample };
+export function generateThinkPadT14RenderScripts(_episode: VideoEssayEpisode, _colorGradeId = 'fincher_nordic'): { windowsBat: string; linuxSh: string; singleShotExample: string } {
+  throw new Error('Legacy Video Essay render-script export is retired. Use Local Render with supplied assets and measured QC.');
 }
 
 /**
@@ -755,189 +621,24 @@ export const NARRATOR_PERSONAS: NarratorVoicePersona[] = [
 ];
 
 /**
- * Generates an upgraded, zero-cost Edge-TTS batch script (Python & Windows Batch)
- * with selectable persona, pitch modulation, and SSML pacing for YouTube broadcast quality.
+ * Retired: Edge-TTS is an online service and this export lacked a consent boundary.
  */
-export function generateEdgeTtsScript(
-  episode: VideoEssayEpisode,
-  personaId: string = 'ryan_uk_investigator',
-  rateOverride?: string,
-  pitchOverride?: string
-): string {
-  const persona = NARRATOR_PERSONAS.find((p) => p.id === personaId) || NARRATOR_PERSONAS[0];
-  const rate = rateOverride || persona.rateMod;
-  const pitch = pitchOverride || persona.pitchMod;
-
-  const lines = episode.slides
-    .map((s) => {
-      const escapedScript = s.narratorScript.replace(/"/g, '\\"');
-      const numPad = String(s.slideNumber).padStart(2, '0');
-      return `echo [Voice ${persona.edgeVoice}] Slide ${numPad}/${episode.totalSlides}...
-edge-tts --voice "${persona.edgeVoice}" --rate="${rate}" --pitch="${pitch}" --volume="+0%" --text "${escapedScript}" --write-media "audio/slide_${numPad}.mp3"`;
-    })
-    .join('\n');
-
-  return `@echo off
-REM ==============================================================================
-REM TERNFALL STUDIO - UPGRADED BROADCAST NARRATOR GENERATOR (Edge-TTS Engine)
-REM Voice Persona: ${persona.name} (${persona.edgeVoice})
-REM Role: ${persona.role}
-REM Tuning: Rate ${rate} | Pitch ${pitch} (Sub-145 WPM Tension Timbre)
-REM Cost: $0.00 / Zero Subscriptions
-REM ==============================================================================
-
-echo [Ternfall Studio] Initializing Upgraded Voiceover Engine...
-echo [Persona] ${persona.name}
-echo [Settings] Rate: ${rate} ^| Pitch: ${pitch}
-mkdir "%~dp0audio" 2>nul
-
-where edge-tts >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] edge-tts is not installed.
-    echo Please install it in 5 seconds via: pip install edge-tts
-    pause
-    exit /b 1
-)
-
-${lines}
-
-echo.
-echo [Edge-TTS] Concatenating 36 narrator clips into master broadcast track...
-(for %%i in (audio\\slide_*.mp3) do @echo file '%%i') > audio\\audio_manifest.txt
-ffmpeg -y -f concat -safe 0 -i audio\\audio_manifest.txt ^
-  -af "highpass=f=80,acompressor=threshold=-18dB:ratio=3:attack=5:release=50" ^
-  -c:a pcm_s16le -ar 48000 "audio/narration_master.wav"
-
-echo.
-echo [SUCCESS] Master voiceover generated at: audio/narration_master.wav
-echo Ready for ThinkPad T14 NVENC assembly!
-`;
+export function generateEdgeTtsScript(_episode: VideoEssayEpisode, _personaId = 'ryan_uk_investigator', _rateOverride?: string, _pitchOverride?: string): string {
+  throw new Error('Legacy Edge-TTS script export is retired; it sends narration to an external service.');
 }
 
 /**
- * Generates an automated 9:16 Shorts / Vertical Video Render Script
- * to repurpose key suspense moments for YouTube Shorts and TikTok.
+ * Retired: unverified legacy Shorts export.
  */
-export function generateShortsRenderScript(episode: VideoEssayEpisode): string {
-  return `@echo off
-REM ==============================================================================
-REM TERNFALL STUDIO - VIRAL 9:16 YOUTUBE SHORTS EXTRACTION (ThinkPad MX330 NVENC)
-REM Automatically crops and renders 3 high-impact cliffhangers for Shorts/Reels/TikTok
-REM ==============================================================================
-
-mkdir "%~dp0output\\shorts" 2>nul
-
-echo [Short 1/3] Rendering Hook: The 03:00 Basin Breach (Slides 1-4)...
-ffmpeg -y -ss 00:00:00 -to 00:01:05 -i "output/${episode.episodeId}_video_essay_master.mp4" ^
-  -vf "crop=ih*(9/16):ih,scale=1080:1920" ^
-  -c:v h264_nvenc -preset p4 -b:v 6M ^
-  -c:a aac -b:a 192k ^
-  "output/shorts/Short_01_Basin_Breach_9x16.mp4"
-
-echo [Short 2/3] Rendering Climax: The Acoustic Resonance (Slides 18-21)...
-ffmpeg -y -ss 00:04:30 -to 00:05:30 -i "output/${episode.episodeId}_video_essay_master.mp4" ^
-  -vf "crop=ih*(9/16):ih,scale=1080:1920" ^
-  -c:v h264_nvenc -preset p4 -b:v 6M ^
-  -c:a aac -b:a 192k ^
-  "output/shorts/Short_02_Acoustic_Trap_9x16.mp4"
-
-echo [Short 3/3] Rendering Cliffhanger: The Siphon Valve Failure (Slides 32-36)...
-ffmpeg -y -ss 00:08:15 -to 00:09:20 -i "output/${episode.episodeId}_video_essay_master.mp4" ^
-  -vf "crop=ih*(9/16):ih,scale=1080:1920" ^
-  -c:v h264_nvenc -preset p4 -b:v 6M ^
-  -c:a aac -b:a 192k ^
-  "output/shorts/Short_03_Cliffhanger_9x16.mp4"
-
-echo [SUCCESS] 3 YouTube Shorts rendered in output/shorts/
-`;
+export function generateShortsRenderScript(_episode: VideoEssayEpisode): string {
+  throw new Error('Legacy Video Essay Shorts script export is retired.');
 }
 
 /**
- * Generates the All-In-One Master Pipeline Orchestrator Script (run_master_production_pipeline.bat)
- * A single double-click script that executes the complete 60-minute daily production routine.
+ * Retired: unverified legacy pipeline export.
  */
-export function generateMasterOrchestratorScript(
-  episode: VideoEssayEpisode,
-  personaId: string = 'ryan_uk_investigator',
-  colorGradeId: string = 'fincher_nordic'
-): string {
-  const persona = NARRATOR_PERSONAS.find((p) => p.id === personaId) || NARRATOR_PERSONAS[0];
-  const grade = COLOR_GRADING_PRESETS.find((g) => g.id === colorGradeId) || COLOR_GRADING_PRESETS[0];
-
-  return `@echo off
-REM ==============================================================================
-REM TERNFALL STUDIO - ALL-IN-ONE MASTER PRODUCTION PIPELINE
-REM Episode: ${episode.episodeId} - ${episode.title}
-REM Narrator: ${persona.name} (${persona.edgeVoice})
-REM Color Grade: ${grade.name}
-REM Hardware Target: Lenovo ThinkPad T14 Gen 1 (NVIDIA GeForce MX330 NVENC)
-REM Total Financial / Credit Cost: $0.00 (Zero Credits)
-REM ==============================================================================
-
-setlocal EnableDelayedExpansion
-title Ternfall Studio - ${episode.episodeId} Master Production Pipeline
-
-echo ==============================================================================
-echo [TERNFALL STUDIO] INITIATING DAILY BROADCAST PRODUCTION
-echo Episode: ${episode.title} (${episode.totalSlides} Slides)
-echo Target: 1080p 25fps Master + 3 Viral 9:16 Shorts
-echo ==============================================================================
-echo.
-
-REM 1. PRE-FLIGHT DIRECTORY SETUP
-echo [1/6] Initializing Project Directory Structure...
-mkdir "%~dp0data\\stills" 2>nul
-mkdir "%~dp0audio" 2>nul
-mkdir "%~dp0output" 2>nul
-mkdir "%~dp0output\\shorts" 2>nul
-mkdir "%~dp0manifests" 2>nul
-
-REM 2. CHECK PREREQUISITES
-echo [2/6] Verifying Hardware & Software Toolchain...
-where ffmpeg >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] FFmpeg not found in PATH!
-    echo Run: winget install Gyan.FFmpeg
-    pause
-    exit /b 1
-)
-
-where edge-tts >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] edge-tts not found!
-    echo Run: pip install edge-tts
-    pause
-    exit /b 1
-)
-
-REM 3. SYNTHESIZE 55HZ SUB-BASS TENSION DRONE
-echo [3/6] Engineering 55Hz Sub-Bass Ambient Frequency...
-ffmpeg -y -f lavfi -i "sine=frequency=55:duration=620" ^
-  -af "volume=0.25,lowpass=f=110" ^
-  -c:a pcm_s16le -ar 48000 "%~dp0audio\\sub_bass_pulse_55hz.wav" -hide_banner -loglevel error
-
-REM 4. SYNTHESIZE NARRATOR VOICEOVER VIA EDGE-TTS
-echo [4/6] Synthesizing Voiceover with ${persona.name}...
-call "%~dp0generate_voiceover.bat"
-
-REM 5. ASSEMBLE 1080P MASTER VIDEO VIA MX330 NVENC
-echo [5/6] Encoding Master Video with 35mm ${grade.name} Grade via NVENC...
-call "%~dp0render_video_essay_nvenc.bat"
-
-REM 6. EXTRACT 3 VIRAL SHORTS FOR YOUTUBE
-echo [6/6] Extracting 3 Vertical 9:16 Shorts for YouTube & TikTok...
-call "%~dp0render_shorts_9x16.bat"
-
-echo.
-echo ==============================================================================
-echo [SUCCESS] DAILY EPISODE PRODUCTION COMPLETE!
-echo Master Video: %~dp0output\\${episode.episodeId}_video_essay_master.mp4
-echo Shorts Clips: %~dp0output\\shorts\\ (3 files)
-echo Total Cost: $0.00 / 0 Credits Used
-echo ==============================================================================
-explorer "%~dp0output"
-pause
-`;
+export function generateMasterOrchestratorScript(_episode: VideoEssayEpisode, _personaId = 'ryan_uk_investigator', _colorGradeId = 'fincher_nordic'): string {
+  throw new Error('Legacy Video Essay master script export is retired.');
 }
 
 /**

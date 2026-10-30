@@ -152,7 +152,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
         <div className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1">
           <div className="font-semibold text-slate-200 flex items-center gap-1.5">
             <Lock className="w-3.5 h-3.5 text-teal-400" />
-            <span>SSRF & Loopback Shield</span>
+            <span>URL syntax and literal checks</span>
           </div>
           <p className="text-slate-400 text-[11px]">
             Checks URL syntax and rejects known local/private literal targets. No source is fetched; DNS and redirects are not checked. This is not a network-fetch safety guarantee.
@@ -162,7 +162,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
         <div className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1">
           <div className="font-semibold text-slate-200 flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-teal-400" />
-            <span>Prompt Injection Defense</span>
+            <span>Advisory text-pattern screening</span>
           </div>
           <p className="text-slate-400 text-[11px]">
             Flags known instruction patterns in bounded note fields. Pattern matching is advisory, not complete injection protection; notes never authorize tools or approvals.
@@ -172,7 +172,7 @@ export const ResearchRoomView: React.FC<ResearchRoomViewProps> = ({ projectId })
         <div className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 text-xs space-y-1">
           <div className="font-semibold text-slate-200 flex items-center gap-1.5">
             <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
-            <span>Human Fact-Check Gate</span>
+            <span>Independent fact-checking unavailable</span>
           </div>
           <p className="text-slate-400 text-[11px]">
             All real-world notes remain unverified. Historical approval labels are not trusted; a durable independent review workflow is not implemented yet.

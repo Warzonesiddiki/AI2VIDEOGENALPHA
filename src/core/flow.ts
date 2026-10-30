@@ -113,64 +113,41 @@ export function formatSecondsToTimecode(totalSeconds: number): string {
   return `${mm}:${ss}.${mmm}`;
 }
 
-/**
- * Generates an individualized prompt for a frame within a 24-image batch.
- */
+/** Small, bounded excerpts of the selected episode; all prompts remain drafts. */
+export interface FlowPlanningContext {
+  logline?: string;
+  physicalObjective?: string;
+  beats?: Array<{ name: string; visualDescription?: string }>;
+}
+function promptExcerpt(value: unknown, maximum = 180): string {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, maximum) : '';
+}
+
+/** Produces a reviewable planning placeholder, never a claim of a generated asset. */
 export function generateBatchFramePrompt(
   batchIndex: number,
   frameIndex: number,
-  totalBatches: number,
+  _totalBatches: number,
   storyBeatTitle: string,
   fps = 24,
-  mode: 'dense_24fps' | 'keyframe_storyboard' = 'dense_24fps'
+  mode: 'dense_24fps' | 'keyframe_storyboard' = 'dense_24fps',
+  context: FlowPlanningContext & { episodeId?: string; episodeTitle?: string; visualDescription?: string } = {}
 ): GoogleFlowBatchPrompt {
   const globalFrameNumber = (batchIndex - 1) * 24 + frameIndex;
-  const frameSeconds = (globalFrameNumber - 1) / (mode === 'keyframe_storyboard' ? 1 : fps);
-  const timecode = formatSecondsToTimecode(frameSeconds);
-
-  // Progressive micro-action sequence across 24 frames
-  const microActions = [
-    'Rhea stands motionless at the heavy cast-iron intake valve wheel, checking the mechanical vibration needle.',
-    'Rhea reaches both hands to the iron wheel rim, gloves wet from the condensation dripping from overhead conduits.',
-    'Rhea braces her boots against the slippery steel tread floor, preparing to rotate the counterweighted valve.',
-    'Close-up on the brass acoustic meter: the mechanical indicator arm hovers dangerously close to the red silence threshold.',
-    'Rhea turns the valve one quarter turn; a low hiss of releasing air escapes through the bypass gasket.',
-    'The water level in the glass sight tube rises two inches, dark brackish liquid bubbling beneath the pressure seal.',
-    'Over-the-shoulder view of Rhea gazing through the wire-reinforced inspection window into the flooded South Gate culvert.',
-    'Distant silhouette in the rain across the canal: a solitary figure stands frozen mid-stride in complete silence.',
-    'Rhea slowly pulls her hands back from the wheel, her knuckles pale against the damp olive-drab fabric.',
-    'Extreme close-up on the vibration needle: it shudders slightly as mechanical tremors resonate through the foundation.',
-    'Rhea turns her head toward the ceiling air shaft, listening for the absent hum of the municipal grid.',
-    'Wide angle: the cavernous concrete siphon chamber, illuminated only by a single amber maintenance lantern.',
-    'Water drips from an overhead galvanized flange, hitting the steel grate floor in slow rhythmic pulses.',
-    'Rhea adjusts the dial on her acoustic sensor, muting the internal buzzer to avoid airborne resonance.',
-    'Medium shot: Rhea reaches for the emergency bypass lever beside the secondary intake manifold.',
-    'The valve counterweight shifts with a muffled mechanical clunk; iron gears mesh in the grease casing.',
-    'Rhea presses her hand against the cold cast iron, feeling the subterranean fluid velocity stabilize.',
-    'The siphon chamber echoes with the sound of low-pressure water clearing the primary air pocket.',
-    'Rhea exhales a visible breath into the chilly subterranean vault air, wiping mist from her inspection goggles.',
-    'Focus shifts to the South Gate bulkhead door behind her: heavy steel locking bolts remain securely thrown.',
-    'Rhea retrieves a grease pencil from her pocket and marks the pressure drop graduation directly onto the pipe.',
-    'The amber warning indicator lamp flickers twice as auxiliary battery voltage dips slightly.',
-    'Rhea takes one step toward the exit ladder, her eyes scanning the dark perimeter catwalk.',
-    'Rhea pauses at the base of the rung ladder, looking back one final time at the stabilized siphon manifold.',
-  ];
-
-  const actionText = microActions[(frameIndex - 1) % microActions.length];
-  const envIndex = (batchIndex + frameIndex) % TERNFALL_ENVIRONMENT_INGREDIENTS.length;
-  const envDescription = TERNFALL_ENVIRONMENT_INGREDIENTS[envIndex];
-
-  const promptText = `[The Quiet Hours: Ternfall - South Gate District - Scene Shot ${batchIndex}.${frameIndex}] ${actionText} ${envDescription}. ${TERNFALL_CHARACTER_INGREDIENT}. Style: ${TERNFALL_STYLE_INGREDIENTS.join(', ')}.`;
-
-  return {
-    frameIndex,
-    globalFrameNumber,
-    timecode,
-    shotAnchor: `Beat ${storyBeatTitle} - Frame ${frameIndex}/24`,
-    promptText,
-    negativePrompt: TERNFALL_NEGATIVE_PROMPT,
-    styleIngredients: [...TERNFALL_STYLE_INGREDIENTS],
-  };
+  const timecode = formatSecondsToTimecode((globalFrameNumber - 1) / (mode === 'keyframe_storyboard' ? 1 : fps));
+  const title = promptExcerpt(context.episodeTitle) || 'Untitled episode';
+  const beat = promptExcerpt(storyBeatTitle) || 'Unspecified beat';
+  const description = promptExcerpt(context.visualDescription);
+  const logline = promptExcerpt(context.logline);
+  const objective = promptExcerpt(context.physicalObjective);
+  const promptText = [
+    `DRAFT: ${title}${context.episodeId ? ` (${context.episodeId})` : ''}, frame ${globalFrameNumber} at ${timecode}.`,
+    `Beat: ${beat}.`,
+    description ? `Visual note: ${description}.` : 'No visual note supplied; an editor must specify the shot.',
+    logline && `Logline: ${logline}.`,
+    objective && `Objective: ${objective}.`,
+  ].filter(Boolean).join(' ');
+  return { frameIndex, globalFrameNumber, timecode, shotAnchor: `${beat} — frame ${globalFrameNumber}`, promptText, negativePrompt: '', styleIngredients: [] };
 }
 
 /**
@@ -182,7 +159,8 @@ export function createGoogleFlowPlan(
   totalDurationSeconds = 600, // 10 minutes default
   fps = 24,
   mode: 'dense_24fps' | 'keyframe_storyboard' = 'dense_24fps',
-  projectId = 'proj_ternfall_01'
+  projectId = 'proj_ternfall_01',
+  context: FlowPlanningContext = {}
 ): GoogleFlowPlan {
   assertIdentifier(episodeId);
   assertIdentifier(projectId);
@@ -236,20 +214,15 @@ export function createGoogleFlowPlan(
   const accountSlots: FlowAccountSlot[] = ['account_1', 'account_2', 'account_3'];
   const batches: GoogleFlowBatch[] = [];
 
-  const storyBeats = [
-    'The Pressure Drop at Siphon 4',
-    'The Acoustic Sensor Redline',
-    'Inspection of South Gate Conduit',
-    'The Frozen Silhouette in the Canal',
-    'Counterweight Manual Bypass',
-    'The Rhythmic Water Drips',
-    'Locking the Bulkhead Gasket',
-    'The Silent Evacuation Catwalk',
-  ];
+  const suppliedBeats = Array.isArray(context.beats)
+    ? context.beats.filter(beat => beat && promptExcerpt(beat.name)).slice(0, 100)
+    : [];
+  const storyBeats = suppliedBeats.length ? suppliedBeats : [{ name: 'Unspecified draft beat', visualDescription: '' }];
 
   for (let b = 1; b <= reqs.totalBatches; b++) {
     const slot = accountSlots[(b - 1) % accountSlots.length];
-    const beatName = storyBeats[(b - 1) % storyBeats.length];
+    const beat = storyBeats[Math.min(storyBeats.length - 1, Math.floor((b - 1) * storyBeats.length / reqs.totalBatches))];
+    const beatName = promptExcerpt(beat.name);
 
     const framesExpected = Math.min(24, reqs.totalFramesExpected - (b - 1) * 24);
     const frameRate = mode === 'keyframe_storyboard' ? 1 : reqs.fps;
@@ -258,7 +231,7 @@ export function createGoogleFlowPlan(
 
     const prompts: GoogleFlowBatchPrompt[] = [];
     for (let f = 1; f <= framesExpected; f++) {
-      prompts.push(generateBatchFramePrompt(b, f, reqs.totalBatches, beatName, reqs.fps, mode));
+      prompts.push(generateBatchFramePrompt(b, f, reqs.totalBatches, beatName, reqs.fps, mode, { episodeId, episodeTitle, logline: context.logline, physicalObjective: context.physicalObjective, visualDescription: beat.visualDescription }));
     }
 
     batches.push({
@@ -271,7 +244,7 @@ export function createGoogleFlowPlan(
         end: formatSecondsToTimecode(endSeconds),
       },
       storyBeatName: beatName,
-      dramaticPacing: 'Steady 24fps tension pacing',
+      dramaticPacing: 'Unreviewed planning placeholder',
       prompts,
       status: 'pending',
       framesExpected,
@@ -379,75 +352,12 @@ export function generateCompleteYouTubeRenderScript(projectId: string, episodeId
   throw new Error('Legacy media scripts are retired. Use the verified local renderer with supplied frames and original audio; no script or media was generated.');
 }
 
-/**
- * Generates ready-to-publish YouTube metadata with optimized CTR titles,
- * timecoded chapter markers, SEO tags, and required synthetic media disclosures.
- */
-export function generateYouTubeMetadataPackage(
-  episodeId: string,
-  title: string,
-  logline: string
-): {
-  titles: string[];
-  selectedTitle: string;
-  description: string;
-  tags: string[];
-  pinnedComment: string;
-  syntheticMediaDisclosure: string;
+/** @deprecated Automated publishing metadata was based on invented pilot facts and is retired. */
+export function generateYouTubeMetadataPackage(episodeId: string, _title: string, _logline: string): {
+  titles: string[]; selectedTitle: string; description: string; tags: string[]; pinnedComment: string; syntheticMediaDisclosure: string;
 } {
-  const titles = [
-    `${title} | The Quiet Hours: Ternfall (Ep. 1)`,
-    `When the City Sirens Went Silent: ${title} (Survival Fiction)`,
-    `The Eight-Beat Mystery in the Flood: ${title} | Ternfall`,
-  ];
-
-  const description = `${logline}
-
-"The Quiet Hours: Ternfall" is an original episodic animated survival thriller.
-Episode: ${episodeId} - "${title}"
-Aspect Ratio: 16:9 1080p @ 24fps
-Audio: Studio Mastered (-14.0 LUFS)
-
-⏱️ CHAPTER TIMESTAMPS:
-00:00 - The Eight-Twitch Pressure Needle
-01:30 - Digital Sensor Network Failure
-03:00 - Trapped Workers at South Gate Sluice
-05:00 - First Evidence: The Eight-Beat Rhythm
-07:00 - Sacrificing the Lower Archive
-09:30 - Manual Bypass Shift & Survival
-12:30 - Map by Sodium-Amber Light
-14:20 - The Second Distant Pulse
-
-📢 FICTIONAL WORK DISCLOSURE:
-This animated series is an original work of survival fiction set in the fictional coastal city of Ternfall. All locations, characters, emergency signals, and infections are entirely fictional and do not represent real-world medical or survival instructions.
-
-Produced with Ternfall Studio & Google Flow (flow.google.com).`;
-
-  const tags = [
-    'Ternfall',
-    'The Quiet Hours',
-    'survival fiction',
-    'animated survival thriller',
-    '24fps animation',
-    'zombie apocalypse',
-    'Rhea Mistry',
-    'South Gate',
-    'indie animation',
-    'survival story',
-  ];
-
-  const pinnedComment = `🚨 What would you have done in Rhea's position: silenced the pump and lost the entire lower blueprint archive, or kept it running to save the mechanics? Let us know in the comments below! 👇`;
-
-  const syntheticMediaDisclosure = 'This content contains AI-generated and procedurally assisted media (2D editorial illustrations and synthetic voice). Fictional creative storytelling only.';
-
-  return {
-    titles,
-    selectedTitle: titles[0],
-    description,
-    tags,
-    pinnedComment,
-    syntheticMediaDisclosure,
-  };
+  assertIdentifier(episodeId);
+  throw new Error('Publishing metadata generation is retired: review actual assets, chapters, rights and disclosures manually. No package was created.');
 }
 
 /**
@@ -535,53 +445,14 @@ export function computeFlowResumePoint(checkpoint: GoogleFlowCheckpoint): {
   };
 }
 
-/**
- * Pure orchestration logic that determines the stages, scripts, deliverables,
- * and QC status for a complete 100% automated YouTube production run.
- */
+/** @deprecated Automatic production is not implemented safely. */
 export function createFlowAutoproduceOrchestrator(
   projectId: string,
   episodeId: string,
-  title: string,
-  logline: string,
-  options: {
-    durationSeconds?: number;
-    fps?: number;
-    mode?: 'dense_24fps' | 'keyframe_storyboard';
-  } = {}
+  _title: string,
+  _logline: string,
+  _options: { durationSeconds?: number; fps?: number; mode?: 'dense_24fps' | 'keyframe_storyboard' } = {}
 ): FlowAutoproduceResult {
-  assertIdentifier(episodeId);
-  assertIdentifier(projectId);
-  const duration = options.durationSeconds ?? 600;
-  const fps = options.fps ?? 24;
-  const mode = options.mode || 'dense_24fps';
-
-  const plan = createGoogleFlowPlan(episodeId, title, duration, fps, mode, projectId);
-  const checkpoint = computeFlowCheckpoint(plan);
-  const youtubePackage = generateYouTubeMetadataPackage(episodeId, title, logline);
-
-  return {
-    success: true,
-    episodeId,
-    stageReached: 'planned',
-    plan,
-    checkpoint,
-    audioMixPath: `./data/production_root/projects/${projectId}/audio/${episodeId}/${episodeId}_master_audio_mix_14lufs.wav`,
-    master16x9Path: `./data/production_root/projects/${projectId}/exports/${episodeId}_The_Quiet_Hours_Ternfall_1080p_24fps_Master.mp4`,
-    short9x16Path: `./data/production_root/projects/${projectId}/exports/${episodeId}_YouTube_Short_Vertical_1080x1920.mp4`,
-    youtubePackage,
-    qcStatus: {
-      resolution: '1920x1080 (16:9) & 1080x1920 (9:16)',
-      fps,
-      loudnessLufs: null,
-      passed: false,
-    },
-    totalFramesVerified: 0,
-    totalBatchesProcessed: 0,
-    billableCostUsd: 0,
-    message: `Production plan prepared for ${episodeId}. No media has been generated, rendered, or QC verified.`,
-  };
+  assertIdentifier(projectId); assertIdentifier(episodeId);
+  throw new Error('Automatic production is unavailable. Use explicit draft planning and supplied-asset local rendering; no run or package was created.');
 }
-
-
-

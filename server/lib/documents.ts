@@ -84,6 +84,11 @@ export class DocumentStore {
   has(file: string): boolean {
     return !!this.db.prepare('SELECT 1 FROM documents WHERE key=?').get(this.key(file));
   }
+  /** Detect any stored descendants without interpreting wildcard characters in paths. */
+  hasUnder(directory: string): boolean {
+    const prefix = `${this.key(directory)}${path.sep}`;
+    return !!this.db.prepare('SELECT 1 FROM documents WHERE substr(key, 1, length(?)) = ? LIMIT 1').get(prefix, prefix);
+  }
   update<T>(file: string, fallback: T, change: (current: T) => T): T {
     return this.transaction(() => {
       const next = change(this.read(file, fallback));

@@ -33,6 +33,9 @@ test('new projects validate text, generate unique server-owned identities and cr
     assert.match(item.id, /^proj_[0-9a-f-]{36}$/); assert.equal(item.revision, 1); assert.equal(item.name, 'Original fixture');
     assert.equal(item.productionRoot, path.join(root, 'projects', item.id));
     const bible = await first.getSeriesBible(item.id); assert.equal(bible?.projectId, item.id); assert.equal(bible?.id, item.activeSeriesId);
+    assert.equal(bible?.logline, ''); assert.deepEqual(bible?.rules, []); assert.deepEqual(bible?.characters, []); assert.deepEqual(bible?.locations, []); assert.deepEqual(bible?.factions, []);
+    assert.doesNotMatch(JSON.stringify(bible), /Rhea|Mara|South Gate|Ternfall/i);
+    await assert.rejects(first.expandArc(item.id, { arcNumber: 1, count: 1, idempotencyKey: 'foreign_roadmap' }), /cannot be expanded into another project/);
     assert.deepEqual(await first.listEpisodes(item.id), []);
     assert.equal((await first.getProject(item.id))?.revision, 1);
   }

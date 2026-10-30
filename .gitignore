@@ -11,3 +11,8 @@ coverage/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Operator data and generated media belong outside the tracked fixture set.
+# Existing tracked legacy files are unaffected; review them before untracking.
+/data/production_root/
+/.aistudio/artifacts/

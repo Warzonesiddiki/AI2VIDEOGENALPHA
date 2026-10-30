@@ -12,7 +12,8 @@
     "lint": "tsc --noEmit",
     "test": "tsx --test src/core/*.test.ts server/*.test.ts",
     "studio": "tsx bin/studio.ts",
-    "bootstrap": "bash ./scripts/bootstrap.sh"
+    "bootstrap": "bash ./scripts/bootstrap.sh",
+    "test:browser": "npm run build && tsx scripts/browser-smoke.ts"
   },
   "bin": {
     "studio": "./bin/studio.ts"
@@ -39,6 +40,7 @@
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.0",
+    "playwright-core": "1.64.1",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"
