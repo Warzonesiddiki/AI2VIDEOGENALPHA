@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
+  <title id="title">Ternfall Studio — The Quiet Hours</title>
+  <desc id="desc">A dark coastal engineering map in teal and amber, with an eight-stroke signal, tide contours, and the words Original stories. Measured evidence. Human decisions.</desc>
+  <defs>
+    <linearGradient id="sea" x2="1" y2="1"><stop stop-color="#07131e"/><stop offset="1" stop-color="#102f35"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#5eead4" stroke-opacity=".08"/></pattern>
+    <linearGradient id="line"><stop stop-color="#2dd4bf" stop-opacity="0"/><stop offset=".5" stop-color="#2dd4bf"/><stop offset="1" stop-color="#fbbf24"/></linearGradient>
+  </defs>
+  <rect width="1280" height="420" rx="22" fill="url(#sea)"/>
+  <rect width="1280" height="420" rx="22" fill="url(#grid)"/>
+  <g fill="none" stroke="#2dd4bf" stroke-opacity=".16" stroke-width="2">
+    <path d="M795-20C710 60 1100 70 950 170S710 260 900 350s150 60 200 100"/>
+    <path d="M830-20C745 60 1135 70 985 170S745 260 935 350s150 60 200 100"/>
+    <path d="M865-20C780 60 1170 70 1020 170S780 260 970 350s150 60 200 100"/>
+    <path d="M900-20C815 60 1205 70 1055 170S815 260 1005 350s150 60 200 100"/>
+    <path d="M935-20C850 60 1240 70 1090 170S850 260 1040 350s150 60 200 100"/>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Consolas, monospace">
+    <text x="64" y="68" font-size="15" fill="#5eead4" letter-spacing="4">THE QUIET HOURS / ORIGINAL SURVIVAL THRILLER</text>
+    <text x="60" y="162" font-size="76" font-weight="700" fill="#f1f5f9" letter-spacing="-3">TERNFALL</text>
+    <text x="64" y="207" font-size="28" fill="#cbd5e1" letter-spacing="12">STUDIO</text>
+    <text x="64" y="268" font-size="20" fill="#fbbf24">Original stories. Measured evidence.</text>
+    <text x="64" y="298" font-size="20" fill="#fbbf24">Human decisions.</text>
+    <text x="64" y="377" font-size="13" fill="#94a3b8" letter-spacing="2">LOCAL-FIRST / DRAFT → INSPECT → RENDER → VERIFY</text>
+    <text x="1000" y="377" font-size="12" fill="#5eead4" letter-spacing="2">SOUTH GATE / 01</text>
+  </g>
+  <path d="M825 213h24v-20h9v40h9v-40h9v40h9v-40h9v40h9v-40h9v40h9v-40h9v40h9v-40h9v40h9v-40h9v40h9v-40h9v20h90" fill="none" stroke="url(#line)" stroke-width="3"/>
+  <circle cx="1170" cy="213" r="5" fill="#fbbf24"/>
+  <path d="M64 332H1216" stroke="#2dd4bf" stroke-opacity=".25"/>
+</svg>

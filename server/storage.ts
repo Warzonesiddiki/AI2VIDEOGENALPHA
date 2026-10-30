@@ -1,6 +1,19 @@
+import { arcCard, validateArcExpansion } from './lib/arcExpansion.ts';
+import { DATA_NOTICE_VERSION } from '../src/core/dataNotice.ts';
+import { settingsView, type DataNoticeEvent } from './lib/dataNotice.ts';
+import { validateProjectText } from '../src/core/projects.ts';
+import { validateResearchClaim, unreviewedResearchClaim } from './lib/researchClaims.ts';
+import { recomputeFlowSummary, isFlowBatchVerified } from '../src/core/flow.ts';
+import { RevisionConflict, assertRevision } from './lib/conflicts.ts';
+import { randomUUID } from 'node:crypto';
+import { SpendLedger, type ReserveSpend, type ReservationState } from './lib/spendLedger.ts';
+import { DocumentStore } from './lib/documents.ts';
+import { promisify } from 'node:util';
+import { execFile } from 'node:child_process';
+import { safePath, assertIdentifier } from './lib/paths.ts';
 /**
  * Ternfall Studio - Server Storage Engine
- * Local-first, file-backed atomic persistence with transactional backups and Doctor diagnostics.
+ * Local-first SQLite metadata with atomic document updates, legacy JSON import and diagnostics.
  * Adheres strictly to Master Project Rules, Matrix 15, and Build Protocol 14.
  */
 
@@ -25,49 +38,83 @@ import { ALL_100_ARCS_ROADMAP, DEFAULT_SERIES_BIBLE, PILOT_EPISODE_CARD } from '
 export class StorageEngine {
   private baseDir: string;
   private isInitialized = false;
+  private initialization?: Promise<void>;
+  private documents?: DocumentStore;
+  private get store(): DocumentStore { return this.documents ??= new DocumentStore(this.baseDir); }
+  public close(): void { this.documents?.close(); this.documents = undefined; this.isInitialized = false; this.initialization = undefined; }
+  private hasDocument(file: string): boolean { return this.store.has(file) || fs.existsSync(safePath(this.baseDir, file)); }
+  private async updateJson<T>(file: string, fallback: T, change: (current: T) => T): Promise<T> {
+    safePath(this.baseDir, file);
+    return this.store.update(file, fallback, change);
+  }
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir || path.resolve(process.cwd(), 'data', 'production_root');
+    this.baseDir = path.resolve(baseDir || path.join(process.cwd(), 'data', 'production_root'));
   }
+
+  public getProductionRoot(): string { return this.baseDir; }
 
   public async init(): Promise<void> {
     if (this.isInitialized) return;
+    if (!this.initialization) this.initialization = this.initialize().catch(error => { this.initialization = undefined; throw error; });
+    return this.initialization;
+  }
+
+  private async initialize(): Promise<void> {
+    safePath(this.baseDir, '.');
     try {
       await fs.promises.mkdir(this.baseDir, { recursive: true });
       await fs.promises.mkdir(path.join(this.baseDir, 'projects'), { recursive: true });
       await fs.promises.mkdir(path.join(this.baseDir, 'backups'), { recursive: true });
 
-      // Initialize default settings if not exists
-      const settingsPath = path.join(this.baseDir, 'settings.json');
-      if (!fs.existsSync(settingsPath)) {
-        await this.atomicWriteJson(settingsPath, {
-          productionTimezone: 'UTC', // Explicit default; user prompted to configure
-          productionRoot: this.baseDir,
-          budgetCaps: {
-            perRunCapUsd: 25.0,
-            perEpisodeCapUsd: 85.0,
-            monthlyCapUsd: 350.0,
-            currency: 'USD',
-          },
-          providerConfigs: {
-            textModality: { provider: 'gemini', modelId: 'gemini-2.5-flash', checkedDate: '2026-10-29' },
-            imageModality: { provider: 'gemini_nano', modelId: 'gemini-nano-banana-2.1', checkedDate: '2026-10-29' },
-            videoModality: { provider: 'gemini_omni', modelId: 'gemini-omni-1.1-flash', checkedDate: '2026-10-29' },
-            ttsModality: { provider: 'cloud_tts', modelId: 'chirp-3-hd', checkedDate: '2026-10-29' },
-          },
-          dataNoticeAccepted: true,
-          noticeAcceptedDate: '2026-10-29',
-        });
-      }
+      this.store.transaction(() => {
+        // Import known legacy metadata only, inside one transaction. Never scan assets.
+        for (const entry of fs.readdirSync(path.join(this.baseDir, 'projects'), { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          assertIdentifier(entry.name);
+          const dir = safePath(this.baseDir, path.join(this.baseDir, 'projects', entry.name));
+          for (const name of ['project.json', 'series.json', 'episodes.json', 'canon_ledger.json', 'research_claims.json', 'jobs.json', 'packages.json', 'autoproduce_runs.json', 'spend_grants.json']) {
+            const file = safePath(this.baseDir, path.join(dir, name));
+            if (fs.existsSync(file)) this.store.read(file, null);
+          }
+          const plans = safePath(this.baseDir, path.join(dir, 'flow_plans'));
+          if (fs.existsSync(plans)) for (const name of fs.readdirSync(plans)) {
+            if (!name.endsWith('.json')) continue;
+            assertIdentifier(name.slice(0, -5));
+            this.store.read(safePath(this.baseDir, path.join(plans, name)), null);
+          }
+        }
+        // Initialize default settings if not exists
+        const settingsPath = path.join(this.baseDir, 'settings.json');
+        if (!this.hasDocument(settingsPath)) {
+          this.store.write(settingsPath, {
+            productionTimezone: 'UTC', // Explicit default; user prompted to configure
+            productionRoot: this.baseDir,
+            budgetCaps: {
+              perRunCapUsd: 25.0,
+              perEpisodeCapUsd: 85.0,
+              monthlyCapUsd: 350.0,
+              currency: 'USD',
+            },
+            providerConfigs: {}, // Capabilities remain unknown until independently checked.
+            dataNoticeAccepted: false,
+            dataNoticeVersion: DATA_NOTICE_VERSION,
+          });
+        }
 
-      // Check if default project exists and is fully seeded; if not, seed it
-      const defaultProjectId = 'proj_ternfall_01';
-      const projectDir = path.join(this.baseDir, 'projects', defaultProjectId);
-      const episodesFile = path.join(projectDir, 'episodes.json');
-      if (!fs.existsSync(episodesFile) || !fs.existsSync(path.join(projectDir, 'project.json'))) {
-        await this.seedDefaultProject(defaultProjectId);
-      }
+        this.store.read(settingsPath, {});
 
+        // Check if default project exists and is fully seeded; if not, seed it
+        const defaultProjectId = 'proj_ternfall_01';
+        const projectDir = path.join(this.baseDir, 'projects', defaultProjectId);
+        const episodesFile = path.join(projectDir, 'episodes.json');
+        if (!fs.existsSync(projectDir) || (fs.readdirSync(projectDir).length === 0 && !this.store.has(path.join(projectDir, 'project.json')))) {
+          this.seedDefaultProject(defaultProjectId);
+        } else if (!this.hasDocument(episodesFile) || !this.hasDocument(path.join(projectDir, 'project.json'))) {
+          throw new Error('Incomplete default project detected; restore missing files from backup. Existing data was not overwritten.');
+        }
+
+      });
       this.isInitialized = true;
     } catch (err) {
       console.error('[StorageEngine] Failed to initialize storage:', err);
@@ -76,30 +123,18 @@ export class StorageEngine {
   }
 
   /**
-   * Performs an atomic write using temporary file renaming.
+   * Compatibility entry point: writes metadata atomically to SQLite, not legacy JSON.
    */
   public async atomicWriteJson<T>(filePath: string, data: T): Promise<void> {
-    const dir = path.dirname(filePath);
-    await fs.promises.mkdir(dir, { recursive: true });
-
-    const tempPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 6)}`;
-    const jsonStr = JSON.stringify(data, null, 2);
-
-    await fs.promises.writeFile(tempPath, jsonStr, 'utf-8');
-    await fs.promises.rename(tempPath, filePath);
+    safePath(this.baseDir, filePath);
+    // Retain directories for media paths/discovery; metadata lives in SQLite.
+    fs.mkdirSync(safePath(this.baseDir, path.dirname(filePath)), { recursive: true });
+    this.store.write(filePath, data);
   }
 
   public async readJson<T>(filePath: string, defaultValue: T): Promise<T> {
-    try {
-      if (!fs.existsSync(filePath)) {
-        return defaultValue;
-      }
-      const raw = await fs.promises.readFile(filePath, 'utf-8');
-      return JSON.parse(raw) as T;
-    } catch (err) {
-      console.warn(`[StorageEngine] Failed to read JSON at ${filePath}, using default:`, err);
-      return defaultValue;
-    }
+    safePath(this.baseDir, filePath);
+    return this.store.read(filePath, defaultValue);
   }
 
   // -------------------------------------------------------------------------
@@ -115,9 +150,9 @@ export class StorageEngine {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const metaFile = path.join(projectsDir, entry.name, 'project.json');
-        if (fs.existsSync(metaFile)) {
+        if (this.hasDocument(metaFile)) {
           const meta = await this.readJson<ProjectMetadata | null>(metaFile, null);
-          if (meta) projects.push(meta);
+          if (meta) projects.push({ ...meta, revision: meta.revision ?? 0 });
         }
       }
     }
@@ -126,20 +161,33 @@ export class StorageEngine {
   }
 
   public async getProject(projectId: string): Promise<ProjectMetadata | null> {
+    assertIdentifier(projectId);
     await this.init();
     const metaFile = path.join(this.baseDir, 'projects', projectId, 'project.json');
-    return this.readJson<ProjectMetadata | null>(metaFile, null);
+    const meta = await this.readJson<ProjectMetadata | null>(metaFile, null);
+    return meta ? { ...meta, revision: meta.revision ?? 0 } : null;
+  }
+
+  /** Consistent metadata snapshot. Media files are intentionally not copied. */
+  public async backupMetadata(): Promise<{ path: string; includesMedia: false }> {
+    await this.init();
+    const destination = safePath(this.baseDir, `backups/metadata_${randomUUID()}.sqlite`);
+    this.store.backup(destination);
+    return { path: destination, includesMedia: false };
   }
 
   public async createProject(name: string, description: string): Promise<ProjectMetadata> {
+    validateProjectText(name, description);
     await this.init();
-    const id = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    const projectDir = path.join(this.baseDir, 'projects', id);
+    name = name.trim();
+    const id = `proj_${randomUUID()}`;
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'project';
+    const projectDir = safePath(this.baseDir, path.join(this.baseDir, 'projects', id));
 
-    await fs.promises.mkdir(projectDir, { recursive: true });
+    await fs.promises.mkdir(safePath(this.baseDir, projectDir), { mode: 0o700 });
 
     const meta: ProjectMetadata = {
+      revision: 1,
       id,
       name,
       slug,
@@ -151,39 +199,43 @@ export class StorageEngine {
       activeSeriesId: `series_${id}`,
     };
 
-    await this.atomicWriteJson(path.join(projectDir, 'project.json'), meta);
+    this.store.transaction(() => {
+      this.store.write(path.join(projectDir, 'project.json'), meta);
 
-    // Create series bible copy
-    const bible: SeriesBible = {
-      ...DEFAULT_SERIES_BIBLE,
-      id: `series_${id}`,
-      projectId: id,
-      seriesTitle: name,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await this.atomicWriteJson(path.join(projectDir, 'series.json'), bible);
-    await this.atomicWriteJson(path.join(projectDir, 'episodes.json'), []);
-    await this.atomicWriteJson(path.join(projectDir, 'canon_ledger.json'), []);
-    await this.atomicWriteJson(path.join(projectDir, 'research_claims.json'), []);
-    await this.atomicWriteJson(path.join(projectDir, 'jobs.json'), []);
-    await this.atomicWriteJson(path.join(projectDir, 'packages.json'), []);
-    await this.atomicWriteJson(path.join(projectDir, 'autoproduce_runs.json'), []);
+      // Create series bible copy
+      const bible: SeriesBible = {
+        ...DEFAULT_SERIES_BIBLE,
+        id: `series_${id}`,
+        projectId: id,
+        seriesTitle: name,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      this.store.write(path.join(projectDir, 'series.json'), bible);
+      this.store.write(path.join(projectDir, 'episodes.json'), []);
+      this.store.write(path.join(projectDir, 'canon_ledger.json'), []);
+      this.store.write(path.join(projectDir, 'research_claims.json'), []);
+      this.store.write(path.join(projectDir, 'jobs.json'), []);
+      this.store.write(path.join(projectDir, 'packages.json'), []);
+      this.store.write(path.join(projectDir, 'autoproduce_runs.json'), []);
 
+    });
     return meta;
   }
 
-  public async archiveProject(projectId: string, isArchived: boolean): Promise<ProjectMetadata | null> {
-    const project = await this.getProject(projectId);
-    if (!project) return null;
-
-    project.isArchived = isArchived;
-    project.archivedAt = isArchived ? new Date().toISOString() : undefined;
-    project.updatedAt = new Date().toISOString();
-
-    const metaFile = path.join(this.baseDir, 'projects', projectId, 'project.json');
-    await this.atomicWriteJson(metaFile, project);
-    return project;
+  public async archiveProject(projectId: string, isArchived: boolean, expectedRevision?: number): Promise<ProjectMetadata | null> {
+    assertIdentifier(projectId); assertRevision(expectedRevision);
+    if (typeof isArchived !== 'boolean') throw new Error('isArchived must be a boolean');
+    await this.init();
+    const file = path.join(this.baseDir, 'projects', projectId, 'project.json');
+    return this.updateJson<ProjectMetadata | null>(file, null, project => {
+      if (!project) return null;
+      if (project.id !== projectId) throw new Error('Project identity mismatch');
+      if ((expectedRevision ?? 0) !== (project.revision ?? 0)) throw new RevisionConflict(project.revision ?? 0);
+      return { ...project, revision: (project.revision ?? 0) + 1, isArchived,
+        archivedAt: isArchived ? (project.archivedAt ?? new Date().toISOString()) : undefined,
+        updatedAt: new Date().toISOString() };
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -191,24 +243,36 @@ export class StorageEngine {
   // -------------------------------------------------------------------------
 
   public async getSeriesBible(projectId: string): Promise<SeriesBible | null> {
+    assertIdentifier(projectId);
     await this.init();
     const filePath = path.join(this.baseDir, 'projects', projectId, 'series.json');
-    return this.readJson<SeriesBible | null>(filePath, null);
+    const bible = await this.readJson<SeriesBible | null>(filePath, null);
+    return bible ? { ...bible, revision: bible.revision ?? 0 } : null;
   }
 
   public async updateSeriesBible(projectId: string, update: Partial<SeriesBible>): Promise<SeriesBible | null> {
-    const bible = await this.getSeriesBible(projectId);
-    if (!bible) return null;
-
-    const merged: SeriesBible = {
-      ...bible,
-      ...update,
-      updatedAt: new Date().toISOString(),
-    };
-
+    assertIdentifier(projectId);
+    await this.init();
     const filePath = path.join(this.baseDir, 'projects', projectId, 'series.json');
-    await this.atomicWriteJson(filePath, merged);
-    return merged;
+    if (!update || typeof update !== 'object' || Array.isArray(update)) throw new Error('Invalid series update');
+    assertRevision(update.revision);
+    const allowed = new Set(['revision', 'id', 'projectId', 'createdAt', 'updatedAt', 'seriesTitle', 'logline', 'targetRuntimeMinutes', 'targetWpm', 'intendedAudience', 'primaryLanguage', 'locale', 'visualBible', 'rules', 'characters', 'locations', 'factions', 'originalityDeclarations']);
+    for (const key of Object.keys(update)) if (!allowed.has(key)) throw new Error(`Unsupported series field: ${key}`);
+    for (const key of ['seriesTitle', 'logline', 'intendedAudience', 'primaryLanguage', 'locale'] as const) {
+      if (update[key] !== undefined && (typeof update[key] !== 'string' || !update[key].trim() || update[key].length > 10_000)) throw new Error(`Invalid series ${key}`);
+    }
+    for (const key of ['rules', 'characters', 'locations', 'factions', 'originalityDeclarations'] as const) {
+      if (update[key] !== undefined && (!Array.isArray(update[key]) || update[key].length > 1000)) throw new Error(`Invalid series ${key}`);
+    }
+    if (update.targetWpm !== undefined && (!Number.isFinite(update.targetWpm) || update.targetWpm < 80 || update.targetWpm > 220)) throw new Error('Invalid series pacing');
+    if (update.targetRuntimeMinutes !== undefined && (!Number.isFinite(update.targetRuntimeMinutes) || update.targetRuntimeMinutes < 1 || update.targetRuntimeMinutes > 120)) throw new Error('Invalid series runtime');
+    if (update.visualBible !== undefined && (!update.visualBible || typeof update.visualBible !== 'object' || Array.isArray(update.visualBible))) throw new Error('Invalid visual bible');
+    return this.updateJson<SeriesBible | null>(filePath, null, bible => {
+      if (!bible) return null;
+      if ((update.id !== undefined && update.id !== bible.id) || (update.projectId !== undefined && update.projectId !== projectId) || (update.createdAt !== undefined && update.createdAt !== bible.createdAt)) throw new Error('Series identity is immutable');
+      if ((update.revision ?? 0) !== (bible.revision ?? 0)) throw new RevisionConflict(bible.revision ?? 0);
+      return { ...bible, ...update, id: bible.id, projectId: bible.projectId, createdAt: bible.createdAt, revision: (bible.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
+    });
   }
 
   public getRoadmapArcs(): ArcRoadmapItem[] {
@@ -220,34 +284,84 @@ export class StorageEngine {
   // -------------------------------------------------------------------------
 
   public async listEpisodes(projectId: string): Promise<EpisodeCard[]> {
+    assertIdentifier(projectId);
     await this.init();
     const filePath = path.join(this.baseDir, 'projects', projectId, 'episodes.json');
     return this.readJson<EpisodeCard[]>(filePath, []);
   }
 
   public async getEpisode(projectId: string, episodeId: string): Promise<EpisodeCard | null> {
+    assertIdentifier(projectId);
     const episodes = await this.listEpisodes(projectId);
     return episodes.find((e) => e.id === episodeId || e.dbId === episodeId) || null;
   }
 
-  public async saveEpisode(projectId: string, episode: EpisodeCard): Promise<EpisodeCard> {
-    const episodes = await this.listEpisodes(projectId);
-    const index = episodes.findIndex((e) => e.id === episode.id || e.dbId === episode.dbId);
+  public async expandArc(projectId: string, input: unknown): Promise<{ arcTitle: string; createdCards: EpisodeCard[] }> {
+    assertIdentifier(projectId);
+    const request = validateArcExpansion(structuredClone(input));
+    await this.init();
+    return this.store.transaction(() => {
+      const dir = path.join(this.baseDir, 'projects', projectId);
+      const project = this.store.read<ProjectMetadata | null>(path.join(dir, 'project.json'), null);
+      if (!project || project.id !== projectId) throw new Error('Arc project not found or mismatched');
+      const series = this.store.read<SeriesBible | null>(path.join(dir, 'series.json'), null);
+      if (!series || series.id !== project.activeSeriesId || series.projectId !== projectId) throw new Error('Arc series scope mismatch');
+      const arc = this.getRoadmapArcs().find(item => item.arcNumber === request.arcNumber);
+      if (!arc) throw new Error('Arc not found');
+      const requestFile = path.join(dir, 'arc_expansions.json');
+      const requests = this.store.read<Array<{ key: string; arcNumber: number; count: number; result: { arcTitle: string; createdCards: EpisodeCard[] } }>>(requestFile, []);
+      const previous = requests.find(item => item.key === request.idempotencyKey);
+      if (previous) {
+        if (previous.arcNumber !== request.arcNumber || previous.count !== request.count) throw Object.assign(new Error('Idempotency key conflicts with a different arc expansion'), { code: 'IDEMPOTENCY_CONFLICT' });
+        return previous.result; // Original creation snapshot, not current edited cards.
+      }
+      const episodeFile = path.join(dir, 'episodes.json');
+      const episodes = this.store.read<EpisodeCard[]>(episodeFile, []);
+      let next = 0;
+      for (const episode of episodes) {
+        for (const value of [episode.episodeNumber, episode.episodeNumberInSeries, Number(/^S\d+E(\d+)$/.exec(episode.id)?.[1] ?? 0)]) {
+          if (value === undefined) continue;
+          if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid legacy episode numbering; reconcile before expansion');
+          next = Math.max(next, value);
+        }
+      }
+      if (!Number.isSafeInteger(next + request.count)) throw new Error('Episode numbering exhausted');
+      const createdCards = Array.from({ length: request.count }, (_, index) => arcCard(project, arc, next + index + 1, index + 1));
+      if (createdCards.some(card => episodes.some(item => item.id === card.id || item.dbId === card.dbId))) throw new Error('Episode allocation collision');
+      const result = { arcTitle: arc.arcTitle, createdCards };
+      this.store.write(episodeFile, [...episodes, ...createdCards]);
+      this.store.write(requestFile, [...requests, { key: request.idempotencyKey, arcNumber: request.arcNumber, count: request.count, result }]);
+      return result;
+    });
+  }
 
-    episode.updatedAt = new Date().toISOString();
-
-    if (index >= 0) {
-      episodes[index] = episode;
-    } else {
-      episodes.push(episode);
-    }
-
-    const filePath = path.join(this.baseDir, 'projects', projectId, 'episodes.json');
-    await this.atomicWriteJson(filePath, episodes);
-    return episode;
+  public async saveEpisode(projectId: string, callerEpisode: EpisodeCard): Promise<EpisodeCard> {
+    const episode = structuredClone(callerEpisode);
+    assertIdentifier(projectId);
+    await this.init();
+    assertIdentifier(episode.id); assertIdentifier(episode.dbId); assertRevision(episode.revision);
+    if (episode.projectId !== projectId) throw new Error('Episode project scope mismatch');
+    const file = path.join(this.baseDir, 'projects', projectId, 'episodes.json');
+    let saved!: EpisodeCard;
+    await this.updateJson<EpisodeCard[]>(file, [], items => {
+      const project = this.store.read<ProjectMetadata | null>(path.join(this.baseDir, 'projects', projectId, 'project.json'), null);
+      if (!project || project.id !== projectId) throw new Error('Episode project not found or mismatched');
+      if (episode.seriesId !== project.activeSeriesId) throw new Error('Episode series scope mismatch');
+      const index = items.findIndex(item => item.id === episode.id || item.dbId === episode.dbId);
+      const current = index >= 0 ? items[index] : undefined;
+      if (!current && (episode.revision ?? 0) !== 0) throw new RevisionConflict(0);
+      if (current && (current.id !== episode.id || current.dbId !== episode.dbId)) throw new Error('Episode identity cannot be changed');
+      if (current && (episode.revision ?? 0) !== (current.revision ?? 0)) throw new RevisionConflict(current.revision ?? 0);
+      saved = { ...episode, revision: (current?.revision ?? 0) + 1, createdAt: current?.createdAt ?? new Date().toISOString(), updatedAt: new Date().toISOString() };
+      if (index < 0) items.push(saved); else items[index] = saved;
+      return items;
+    });
+    Object.assign(callerEpisode, structuredClone(saved)); // Existing typed CLI callers retain the new revision.
+    return saved;
   }
 
   public async duplicateEpisode(projectId: string, sourceEpisodeId: string, newTitle?: string): Promise<EpisodeCard | null> {
+    assertIdentifier(projectId);
     const source = await this.getEpisode(projectId, sourceEpisodeId);
     if (!source) return null;
 
@@ -269,9 +383,14 @@ export class StorageEngine {
       updatedAt: new Date().toISOString(),
     };
 
-    episodes.push(duplicate);
     const filePath = path.join(this.baseDir, 'projects', projectId, 'episodes.json');
-    await this.atomicWriteJson(filePath, episodes);
+    await this.updateJson<EpisodeCard[]>(filePath, [], latest => {
+      const next = Math.max(0, ...latest.map(item => item.episodeNumber ?? 0)) + 1;
+      duplicate.id = `S01E${String(next).padStart(3, '0')}`;
+      duplicate.episodeNumber = next;
+      duplicate.revision = 1;
+      return [...latest, duplicate];
+    });
     return duplicate;
   }
 
@@ -280,43 +399,78 @@ export class StorageEngine {
   // -------------------------------------------------------------------------
 
   public async listCanonEvents(projectId: string): Promise<CanonEvent[]> {
+    assertIdentifier(projectId);
     await this.init();
     const filePath = path.join(this.baseDir, 'projects', projectId, 'canon_ledger.json');
     return this.readJson<CanonEvent[]>(filePath, []);
   }
 
   public async addCanonEvent(projectId: string, event: CanonEvent): Promise<CanonEvent> {
-    const events = await this.listCanonEvents(projectId);
-    events.push(event);
-    const filePath = path.join(this.baseDir, 'projects', projectId, 'canon_ledger.json');
-    await this.atomicWriteJson(filePath, events);
+    assertIdentifier(projectId);
+    await this.init();
+    const file = path.join(this.baseDir, 'projects', projectId, 'canon_ledger.json');
+    await this.updateJson<CanonEvent[]>(file, [], events => {
+      if (events.some(existing => existing.id === event.id)) throw new Error('Canon event ID already exists');
+      return [...events, event];
+    });
     return event;
   }
 
   public async saveCanonEvent(projectId: string, event: CanonEvent): Promise<CanonEvent> {
+    assertIdentifier(projectId);
     return this.addCanonEvent(projectId, event);
   }
 
   public async listResearchClaims(projectId: string): Promise<ResearchClaim[]> {
+    assertIdentifier(projectId);
     await this.init();
     const filePath = path.join(this.baseDir, 'projects', projectId, 'research_claims.json');
-    return this.readJson<ResearchClaim[]>(filePath, []);
+    return (await this.readJson<ResearchClaim[]>(filePath, [])).map(unreviewedResearchClaim);
   }
 
   public async saveResearchClaim(projectId: string, claim: ResearchClaim): Promise<ResearchClaim> {
-    const claims = await this.listResearchClaims(projectId);
-    const index = claims.findIndex((c) => c.id === claim.id);
-    claim.updatedAt = new Date().toISOString();
+    assertIdentifier(projectId);
+    const checked = validateResearchClaim(projectId, claim);
+    await this.init();
+    if (!(await this.getProject(projectId))) throw new Error('Research project not found');
+    const file = path.join(this.baseDir, 'projects', projectId, 'research_claims.json');
+    let saved!: ResearchClaim;
+    await this.updateJson<ResearchClaim[]>(file, [], items => {
+      const index = items.findIndex(item => item.id === checked.id);
+      const current = items[index];
+      if ((checked.revision ?? 0) !== (current?.revision ?? 0)) throw new RevisionConflict(current?.revision ?? 0);
+      if (current && (current.projectId !== projectId || current.createdAt !== checked.createdAt)) throw new Error('Research identity is immutable');
+      saved = { ...checked, revision: (current?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
+      if (index < 0) items.push(saved); else items[index] = saved;
+      return items;
+    });
+    return saved;
+  }
 
-    if (index >= 0) {
-      claims[index] = claim;
-    } else {
-      claims.push(claim);
-    }
-
-    const filePath = path.join(this.baseDir, 'projects', projectId, 'research_claims.json');
-    await this.atomicWriteJson(filePath, claims);
-    return claim;
+  /** Internal metadata CAS only. This is not execution, QC or approval authority. */
+  private async saveProductionRecord<T extends { revision?: number; createdAt: string; updatedAt: string; projectId?: string; episodeId?: string }>(projectId: string, name: string, key: 'id' | 'runId', input: T): Promise<T> {
+    assertIdentifier(projectId);
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid production record');
+    const record = structuredClone(input);
+    assertIdentifier((record as any)[key]); assertRevision(record.revision);
+    if (record.projectId !== undefined && record.projectId !== projectId) throw new Error('Production record project scope mismatch');
+    if (record.episodeId !== undefined) assertIdentifier(record.episodeId);
+    if (typeof record.createdAt !== 'string' || !Number.isFinite(Date.parse(record.createdAt))) throw new Error('Invalid production record creation time');
+    await this.init();
+    if (!(await this.getProject(projectId))) throw new Error('Production record project not found');
+    if (record.episodeId && !(await this.getEpisode(projectId, record.episodeId))) throw new Error('Production record episode not found');
+    let saved!: T;
+    const file = path.join(this.baseDir, 'projects', projectId, name);
+    await this.updateJson<T[]>(file, [], items => {
+      const index = items.findIndex(item => (item as any)[key] === (record as any)[key]);
+      const current = items[index];
+      if ((record.revision ?? 0) !== (current?.revision ?? 0)) throw new RevisionConflict(current?.revision ?? 0);
+      if (current && (current.createdAt !== record.createdAt || current.episodeId !== record.episodeId || (current.projectId !== undefined && current.projectId !== projectId))) throw new Error('Production record identity is immutable');
+      saved = { ...record, projectId, revision: (current?.revision ?? 0) + 1, updatedAt: new Date().toISOString() };
+      if (index < 0) items.push(saved); else items[index] = saved;
+      return items;
+    });
+    return saved;
   }
 
   // -------------------------------------------------------------------------
@@ -324,10 +478,11 @@ export class StorageEngine {
   // -------------------------------------------------------------------------
 
   public async listJobs(projectId?: string): Promise<GenerationJob[]> {
+    if (projectId !== undefined) assertIdentifier(projectId);
     await this.init();
     if (projectId) {
       const filePath = path.join(this.baseDir, 'projects', projectId, 'jobs.json');
-      return this.readJson<GenerationJob[]>(filePath, []);
+      return (await this.readJson<GenerationJob[]>(filePath, [])).map(job => ({ ...job, revision: job.revision ?? 0 }));
     }
 
     // List across all projects
@@ -336,25 +491,13 @@ export class StorageEngine {
     for (const p of projects) {
       const filePath = path.join(this.baseDir, 'projects', p.id, 'jobs.json');
       const jobs = await this.readJson<GenerationJob[]>(filePath, []);
-      allJobs.push(...jobs);
+      allJobs.push(...jobs.map(job => ({ ...job, revision: job.revision ?? 0 })));
     }
     return allJobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   public async saveJob(projectId: string, job: GenerationJob): Promise<GenerationJob> {
-    const jobs = await this.listJobs(projectId);
-    const index = jobs.findIndex((j) => j.id === job.id);
-    job.updatedAt = new Date().toISOString();
-
-    if (index >= 0) {
-      jobs[index] = job;
-    } else {
-      jobs.push(job);
-    }
-
-    const filePath = path.join(this.baseDir, 'projects', projectId, 'jobs.json');
-    await this.atomicWriteJson(filePath, jobs);
-    return job;
+    return this.saveProductionRecord<GenerationJob>(projectId, 'jobs.json', 'id', job);
   }
 
   // -------------------------------------------------------------------------
@@ -362,25 +505,14 @@ export class StorageEngine {
   // -------------------------------------------------------------------------
 
   public async listAutoproduceRuns(projectId: string): Promise<AutoproduceRun[]> {
+    assertIdentifier(projectId);
     await this.init();
     const filePath = path.join(this.baseDir, 'projects', projectId, 'autoproduce_runs.json');
-    return this.readJson<AutoproduceRun[]>(filePath, []);
+    return (await this.readJson<AutoproduceRun[]>(filePath, [])).map(run => ({ ...run, revision: run.revision ?? 0 }));
   }
 
   public async saveAutoproduceRun(projectId: string, run: AutoproduceRun): Promise<AutoproduceRun> {
-    const runs = await this.listAutoproduceRuns(projectId);
-    const index = runs.findIndex((r) => r.runId === run.runId);
-    run.updatedAt = new Date().toISOString();
-
-    if (index >= 0) {
-      runs[index] = run;
-    } else {
-      runs.push(run);
-    }
-
-    const filePath = path.join(this.baseDir, 'projects', projectId, 'autoproduce_runs.json');
-    await this.atomicWriteJson(filePath, runs);
-    return run;
+    return this.saveProductionRecord<AutoproduceRun>(projectId, 'autoproduce_runs.json', 'runId', run);
   }
 
   // -------------------------------------------------------------------------
@@ -388,107 +520,15 @@ export class StorageEngine {
   // -------------------------------------------------------------------------
 
   public async listPackages(projectId: string): Promise<YouTubePackage[]> {
+    assertIdentifier(projectId);
     await this.init();
     const filePath = path.join(this.baseDir, 'projects', projectId, 'packages.json');
     const existing = await this.readJson<YouTubePackage[]>(filePath, []);
-    if (existing.length === 0) {
-      const defaultPackage: YouTubePackage = {
-        id: 'pkg_s01e001_default',
-        episodeId: 'S01E001',
-        workingTitle: 'The Eight-Beat Failure',
-        titleOptions: [
-          'The Eight-Beat Failure | The Quiet Hours: Ternfall (Ep. 1)',
-          'When the City Sirens Went Silent (Ternfall Ep. 1)',
-        ],
-        selectedTitle: 'The Eight-Beat Failure | The Quiet Hours: Ternfall (Ep. 1)',
-        description: `When the emergency sirens fall silent in Ternfall, municipal water engineer Rhea Mistry discovers the infected moving in an eerie eight-beat rhythm below South Gate.
-
-Original 2D animated survival fiction series.
-Episode: S01E01 - "The Eight-Beat Failure"
-Target Runtime: ~15 minutes
-
-TIMESTAMPS:
-00:00 - The Eight-Twitch Gauge
-00:25 - Rhea Mistry & South Gate
-01:30 - False Sensor Panel
-03:00 - Trapped Workers at the Sluice
-05:00 - Moving to the Pump Pulse
-07:00 - Sacrificing the Lower Archive
-09:30 - Manual Bypass Shift
-12:30 - Paper Map by Sodium Light
-14:20 - The Second Pulse from the North
-
-FICTIONAL CONTENT NOTICE:
-This is an original work of survival fiction. All infections, emergency signals, and characters are entirely fictional. Not medical or survival guidance.`,
-        chapterTimestamps: [
-          { timecode: '00:00', label: 'The Eight-Twitch Gauge' },
-          { timecode: '01:30', label: 'False Sensor Panel' },
-          { timecode: '05:00', label: 'Moving to the Pump Pulse' },
-          { timecode: '09:30', label: 'Manual Bypass Shift' },
-          { timecode: '14:20', label: 'The Second Pulse' },
-        ],
-        tags: ['Ternfall', 'survival story', 'animated thriller', 'zombie survival', 'Rhea Mistry', 'indie animation'],
-        thumbnailPath: 'assets/thumbnails/s01e001_thumbnail.jpg',
-        master16x9Path: 'exports/S01E001_The_Eight_Beat_Failure_1080p.mp4',
-        master16x9DurationSeconds: 902,
-        master16x9Resolution: '1920x1080 (16:9 H.264/AAC)',
-        shortsVariants: [
-          {
-            shortId: 'short_s01e001_01',
-            path: 'exports/S01E001_Short_01_The_Needle.mp4',
-            durationSeconds: 58,
-            hookDescription: 'Why the brass pressure needle twitched 8 times before the silence',
-          },
-          {
-            shortId: 'short_s01e001_02',
-            path: 'exports/S01E001_Short_02_Moving_In_Rhythm.mp4',
-            durationSeconds: 52,
-            hookDescription: 'The infected don’t care about yelling—they listen to the pump',
-          },
-        ],
-        captionsSrtPath: 'exports/S01E001_captions.srt',
-        captionsVttPath: 'exports/S01E001_captions.vtt',
-        captionLanguage: 'en',
-        audienceSetting: 'not_made_for_kids',
-        ageRestriction: false,
-        alteredSyntheticDisclosureChoice: 'no_disclosure_needed',
-        rightsClearanceVerified: true,
-        targetPrivacyStatus: 'private',
-        productionTimezone: 'Asia/Kolkata',
-        humanApprovedForUpload: false,
-        humanApprovedForPublish: false,
-        qcReport: {
-          passed: true,
-          ffprobeStatus: 'H.264 High@L4.1, 1920x1080, 24fps, yuv420p, AAC stereo 192kbps 48kHz',
-          audioClippingDetected: false,
-          aspectRatioConfirmed: true,
-          missingFrames: false,
-          loudnessLufs: -14.2,
-          issues: [],
-        },
-        createdAt: '2026-10-29T00:00:00.000Z',
-        updatedAt: '2026-10-29T00:00:00.000Z',
-      };
-      await this.atomicWriteJson(filePath, [defaultPackage]);
-      return [defaultPackage];
-    }
-    return existing;
+    return existing.map(pkg => ({ ...pkg, projectId: pkg.projectId ?? projectId, revision: pkg.revision ?? 0 }));
   }
 
   public async savePackage(projectId: string, pkg: YouTubePackage): Promise<YouTubePackage> {
-    const packages = await this.listPackages(projectId);
-    const index = packages.findIndex((p) => p.id === pkg.id);
-    pkg.updatedAt = new Date().toISOString();
-
-    if (index >= 0) {
-      packages[index] = pkg;
-    } else {
-      packages.push(pkg);
-    }
-
-    const filePath = path.join(this.baseDir, 'projects', projectId, 'packages.json');
-    await this.atomicWriteJson(filePath, packages);
-    return pkg;
+    return this.saveProductionRecord<YouTubePackage>(projectId, 'packages.json', 'id', pkg);
   }
 
   // -------------------------------------------------------------------------
@@ -496,25 +536,26 @@ This is an original work of survival fiction. All infections, emergency signals,
   // -------------------------------------------------------------------------
 
   public async listSpendGrants(projectId: string): Promise<SpendApprovalGrant[]> {
+    assertIdentifier(projectId);
     await this.init();
     const filePath = path.join(this.baseDir, 'projects', projectId, 'spend_grants.json');
     return this.readJson<SpendApprovalGrant[]>(filePath, []);
   }
 
   public async saveSpendGrant(projectId: string, grant: SpendApprovalGrant): Promise<SpendApprovalGrant> {
-    const grants = await this.listSpendGrants(projectId);
-    const index = grants.findIndex((g) => g.approvalId === grant.approvalId);
-    if (index >= 0) {
-      grants[index] = grant;
-    } else {
-      grants.push(grant);
-    }
-    const filePath = path.join(this.baseDir, 'projects', projectId, 'spend_grants.json');
-    await this.atomicWriteJson(filePath, grants);
+    assertIdentifier(projectId);
+    await this.init();
+    const file = path.join(this.baseDir, 'projects', projectId, 'spend_grants.json');
+    await this.updateJson<SpendApprovalGrant[]>(file, [], items => {
+      const index = items.findIndex(item => item.approvalId === grant.approvalId);
+      if (index < 0) items.push(grant); else items[index] = grant;
+      return items;
+    });
     return grant;
   }
 
   public async getSpendGrant(projectId: string, approvalId: string): Promise<SpendApprovalGrant | null> {
+    assertIdentifier(projectId);
     const grants = await this.listSpendGrants(projectId);
     return grants.find((g) => g.approvalId === approvalId) || null;
   }
@@ -523,23 +564,73 @@ This is an original work of survival fiction. All infections, emergency signals,
   // Settings & Doctor
   // -------------------------------------------------------------------------
 
+  /** Internal worker API only. No HTTP/CLI grant creation or paid execution is enabled. */
+  public async reserveSpend(request: ReserveSpend) {
+    await this.init();
+    return new SpendLedger(this.baseDir, this.store).reserve(request);
+  }
+  public async transitionSpend(projectId: string, reservationId: string, state: Exclude<ReservationState, 'reserved'>, evidence?: string, actualCostUsd?: number) {
+    await this.init();
+    return new SpendLedger(this.baseDir, this.store).transition(projectId, reservationId, state, evidence, actualCostUsd);
+  }
+  public async listSpendReservations(projectId: string) {
+    await this.init();
+    return new SpendLedger(this.baseDir, this.store).list(projectId);
+  }
+  public async listSpendEvents(projectId: string) {
+    await this.init();
+    return new SpendLedger(this.baseDir, this.store).events(projectId);
+  }
+
   public async getSettings(): Promise<Record<string, unknown>> {
     await this.init();
     const settingsPath = path.join(this.baseDir, 'settings.json');
-    return this.readJson<Record<string, unknown>>(settingsPath, {});
+    return this.store.transaction(() => settingsView(
+      this.store.read<Record<string, unknown>>(settingsPath, {}),
+      this.store.read<DataNoticeEvent[]>(path.join(this.baseDir, 'data_notice_events.json'), []),
+    ));
   }
 
   public async updateSettings(update: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const current = await this.getSettings();
-    const merged = { ...current, ...update, updatedAt: new Date().toISOString() };
+    if (!update || typeof update !== 'object' || Array.isArray(update)) throw new Error('Invalid settings');
+    assertRevision(update.revision);
+    const allowed = new Set(['revision', 'productionTimezone', 'dataNoticeAccepted', 'dataNoticeVersion']);
+    for (const key of Object.keys(update)) if (!allowed.has(key)) throw new Error(`Setting ${key} cannot be changed through this endpoint`);
+    if (update.productionTimezone !== undefined) {
+      if (typeof update.productionTimezone !== 'string') throw new Error('Invalid timezone');
+      new Intl.DateTimeFormat('en', { timeZone: update.productionTimezone });
+    }
+    if (update.dataNoticeAccepted !== undefined && typeof update.dataNoticeAccepted !== 'boolean') throw new Error('Invalid consent');
+    if (update.dataNoticeVersion !== undefined && update.dataNoticeVersion !== DATA_NOTICE_VERSION) throw new Error('Reload the current data notice before acknowledging it');
+    if (update.dataNoticeAccepted === true && update.dataNoticeVersion !== DATA_NOTICE_VERSION) throw new Error('Acknowledgement requires the current dataNoticeVersion');
+    await this.init();
     const settingsPath = path.join(this.baseDir, 'settings.json');
-    await this.atomicWriteJson(settingsPath, merged);
-    return merged;
+    return this.updateJson<Record<string, unknown>>(settingsPath, {}, current => {
+      if ((update.revision ?? 0) !== (current.revision ?? 0)) throw new RevisionConflict((current.revision ?? 0) as number);
+      const revision = ((current.revision ?? 0) as number) + 1;
+      const eventPath = path.join(this.baseDir, 'data_notice_events.json');
+      const events = this.store.read<DataNoticeEvent[]>(eventPath, []);
+      if (update.dataNoticeAccepted !== undefined) {
+        events.push({ version: DATA_NOTICE_VERSION, accepted: update.dataNoticeAccepted as boolean, recordedAt: new Date().toISOString(), settingsRevision: revision, channel: 'operator-settings' });
+        this.store.write(eventPath, events); // Same transaction as settings; caller cannot provide events/timestamps.
+      }
+      return settingsView({ ...current, ...update, revision, updatedAt: new Date().toISOString() }, events);
+    });
   }
 
   public async runDoctorDiagnostics(): Promise<SystemDiagnostics> {
     await this.init();
-    const isCloud = !!process.env.APP_URL || !!process.env.K_SERVICE || !process.platform.startsWith('win');
+    const isCloud = !!process.env.APP_URL || !!process.env.K_SERVICE || process.env.STUDIO_CLOUD_PREVIEW === 'true';
+    const probe = async (executable: string, args: string[]) => {
+      try {
+        const { stdout } = await promisify(execFile)(executable, args, { timeout: 3000, maxBuffer: 65536 });
+        return stdout.trim().split('\n')[0];
+      } catch { return undefined; }
+    };
+    const [ffmpegVersion, ffprobeVersion, opencodeVersion] = await Promise.all([
+      probe('ffmpeg', ['-version']), probe('ffprobe', ['-version']), probe('opencode', ['--version']),
+    ]);
+    const disk = await fs.promises.statfs(this.baseDir).catch(() => undefined);
 
     let isWritable = false;
     try {
@@ -583,45 +674,22 @@ This is an original work of survival fiction. All infections, emergency signals,
       runtimeEnvironment: isCloud ? 'cloud_preview' : (process.platform === 'win32' ? 'local_windows' : 'local_linux'),
       nodeVersion: process.version,
       osPlatform: `${process.platform} (${process.arch})`,
-      hardwareProfile: {
-        computerName: 'DESKTOP-NJ43QJR',
-        machineModel: 'LENOVO ThinkPad T14 Gen 1 (20S0S1MC00)',
-        cpuModel: 'Intel Core i7-10510U (4 Cores / 8 Threads)',
-        cpuCores: 4,
-        cpuThreads: 8,
-        cpuMaxTurboGhz: 4.90,
-        coolingSolution: 'External Modified Water/Liquid Cooler (Zero Thermal Throttling)',
-        thermalStatus: 'Active Liquid Cooled • 30.0W Unlocked Sustained • Never Throttles',
-        ramTotalGb: 20.0,
-        ramConfig: '20 GB DDR4 (16GB Samsung + 4GB SK Hynix @ 2667 MT/s Dual-Channel)',
-        ramScratchAllocatedGb: 4.0,
-        ramHeadroomGb: 12.0,
-        gpuName: 'NVIDIA GeForce MX330 (2GB GDDR5 SK Hynix)',
-        gpuVramGb: 2.0,
-        gpuArchitecture: 'Pascal GP108-655 (PCIe x4 8.0 GT/s)',
-        secondaryGpu: 'Intel UHD Graphics (Comet Lake GT2 - QSV HW Engine)',
-        nvmeModel: 'Crucial CT500P3SSD8 (500 GB NVMe PCIe 3.0 x4)',
-        nvmeSpeed: 'PCIe Gen3 x4 (8.0 GT/s) ~3,500 MB/s',
-        nvencSupported: true,
-        nvencCodec: 'h264_nvenc',
-        recommendedFps: 24,
-        recommendedConcatMode: 'lossless_stream_copy',
-        ffmpegNvencPreset: 'ffmpeg -hwaccel cuda -i input.mp4 -c:v h264_nvenc -preset p4 -cq 19 -b:v 12M output.mp4',
-      },
+      // Hardware/encoder capability is unknown until measured, not a fixed laptop profile.
       storage: {
         productionRoot: this.baseDir,
         isWritable,
         isLocalDiskMounted: !isCloud,
-        freeSpaceMb: 15420,
+        freeSpaceMb: disk ? Math.floor(disk.bavail * disk.bsize / 1024 / 1024) : undefined,
       },
       ffmpeg: {
-        installed: false, // Cloud preview does not assume local ffmpeg
-        version: undefined,
-        ffprobeAvailable: false,
+        installed: !!ffmpegVersion,
+        version: ffmpegVersion,
+        ffprobeAvailable: !!ffprobeVersion,
       },
       opencode: {
-        installed: false,
-        wslRecommended: true,
+        installed: !!opencodeVersion,
+        cliVersion: opencodeVersion,
+        wslRecommended: process.platform === 'win32',
       },
       providers: [
         {
@@ -629,7 +697,7 @@ This is an original work of survival fiction. All infections, emergency signals,
           modality: 'text',
           modelId: 'gemini-2.5-flash',
           isConfigured: hasGeminiKey,
-          status: hasGeminiKey ? 'ready' : 'unconfigured',
+          status: hasGeminiKey ? 'configured_unverified' : 'unconfigured',
           estimatedCostBasis: 'Free/Standard Pay-as-you-go',
         },
         {
@@ -637,16 +705,16 @@ This is an original work of survival fiction. All infections, emergency signals,
           modality: 'image',
           modelId: 'gemini-nano-banana-2.1',
           isConfigured: hasGeminiKey,
-          status: hasGeminiKey ? 'ready' : 'unconfigured',
-          estimatedCostBasis: '~$0.0336 per 1K image (Interactions API)',
+          status: hasGeminiKey ? 'configured_unverified' : 'unconfigured',
+          estimatedCostBasis: 'Unverified; image generation is not implemented',
         },
         {
           name: 'Gemini Omni Flash 1.1',
           modality: 'video',
           modelId: 'gemini-omni-1.1-flash',
           isConfigured: hasGeminiKey,
-          status: hasGeminiKey ? 'ready' : 'unconfigured',
-          estimatedCostBasis: '~$0.10/sec (720p 3-10s clips, Interactions API)',
+          status: hasGeminiKey ? 'configured_unverified' : 'unconfigured',
+          estimatedCostBasis: 'Unverified; video generation is not implemented',
         },
         {
           name: 'Google Cloud Chirp 3 HD',
@@ -675,29 +743,55 @@ This is an original work of survival fiction. All infections, emergency signals,
   // -------------------------------------------------------------------------
 
   public async getGoogleFlowPlan(projectId: string, episodeId: string): Promise<GoogleFlowPlan | null> {
+    assertIdentifier(projectId);
     await this.init();
-    const filePath = path.join(this.baseDir, 'projects', projectId, 'flow_plans', `${episodeId}.json`);
-    if (!fs.existsSync(filePath)) {
+    assertIdentifier(episodeId);
+    const filePath = safePath(this.baseDir, path.join(this.baseDir, 'projects', projectId, 'flow_plans', `${episodeId}.json`));
+    if (!this.hasDocument(filePath)) {
       return null;
     }
-    return this.readJson<GoogleFlowPlan | null>(filePath, null);
+    const plan = await this.readJson<GoogleFlowPlan | null>(filePath, null);
+    if (!plan) return null;
+    plan.projectId = projectId;
+    plan.outputDirectory = `./data/production_root/projects/${projectId}/assets/flow_renders/${episodeId}`;
+    delete plan.creditEconomics;
+    for (const batch of plan.batches) if (batch.status === 'verified' && !isFlowBatchVerified(batch)) {
+      batch.status = 'pending'; delete batch.verification;
+      batch.ingestedFrameCount = 0; batch.ingestedFiles = [];
+      batch.missingFrames = Array.from({ length: batch.framesExpected }, (_, index) => (batch.batchIndex - 1) * 24 + index + 1);
+    }
+    recomputeFlowSummary(plan);
+    for (const account of Object.values(plan.accounts)) Object.assign(account, { isPro: false, telemetryVerified: false, emailOrIdentifier: '', creditsBalance: 0, dailyCreditsRefill: 0, dailyBatchQuota: 0, status: 'idle' });
+    return plan;
   }
 
-  public async saveGoogleFlowPlan(projectId: string, plan: GoogleFlowPlan): Promise<void> {
+  public async saveGoogleFlowPlan(projectId: string, callerPlan: GoogleFlowPlan): Promise<void> {
+    const plan = structuredClone(callerPlan);
+    assertIdentifier(projectId); assertIdentifier(plan.episodeId); assertRevision(plan.revision);
+    if (plan.projectId !== undefined && plan.projectId !== projectId) throw new Error('Plan project scope mismatch');
     await this.init();
-    const dir = path.join(this.baseDir, 'projects', projectId, 'flow_plans');
-    await fs.promises.mkdir(dir, { recursive: true });
-    const filePath = path.join(dir, `${plan.episodeId}.json`);
-    await this.atomicWriteJson(filePath, plan);
+    const file = safePath(this.baseDir, path.join(this.baseDir, 'projects', projectId, 'flow_plans', `${plan.episodeId}.json`));
+    let saved!: GoogleFlowPlan;
+    await this.updateJson<GoogleFlowPlan | null>(file, null, current => {
+      const project = this.store.read<ProjectMetadata | null>(path.join(this.baseDir, 'projects', projectId, 'project.json'), null);
+      if (!project || project.id !== projectId) throw new Error('Plan project not found or mismatched');
+      const episodes = this.store.read<EpisodeCard[]>(path.join(this.baseDir, 'projects', projectId, 'episodes.json'), []);
+      if (!episodes.some(episode => episode.id === plan.episodeId && episode.projectId === projectId)) throw new Error('Plan episode not found in project');
+      if (!current && (plan.revision ?? 0) !== 0) throw new RevisionConflict(0);
+      if (current && (plan.revision ?? 0) !== (current.revision ?? 0)) throw new RevisionConflict(current.revision ?? 0);
+      saved = { ...plan, projectId, revision: (current?.revision ?? 0) + 1, outputDirectory: `./data/production_root/projects/${projectId}/assets/flow_renders/${plan.episodeId}`, updatedAt: new Date().toISOString() };
+      return saved;
+    });
+    Object.assign(callerPlan, structuredClone(saved));
   }
 
   // -------------------------------------------------------------------------
   // Default Seed Initializer
   // -------------------------------------------------------------------------
 
-  private async seedDefaultProject(projectId: string): Promise<void> {
+  private seedDefaultProject(projectId: string): void {
     const projectDir = path.join(this.baseDir, 'projects', projectId);
-    await fs.promises.mkdir(projectDir, { recursive: true });
+    fs.mkdirSync(safePath(this.baseDir, projectDir), { recursive: true });
 
     const meta: ProjectMetadata = {
       id: projectId,
@@ -711,9 +805,9 @@ This is an original work of survival fiction. All infections, emergency signals,
       activeSeriesId: 'series_ternfall_01',
     };
 
-    await this.atomicWriteJson(path.join(projectDir, 'project.json'), meta);
-    await this.atomicWriteJson(path.join(projectDir, 'series.json'), DEFAULT_SERIES_BIBLE);
-    await this.atomicWriteJson(path.join(projectDir, 'episodes.json'), [PILOT_EPISODE_CARD]);
+    this.store.write(path.join(projectDir, 'project.json'), meta);
+    this.store.write(path.join(projectDir, 'series.json'), DEFAULT_SERIES_BIBLE);
+    this.store.write(path.join(projectDir, 'episodes.json'), [PILOT_EPISODE_CARD]);
 
     const initialCanon: CanonEvent = {
       id: 'canon_001',
@@ -736,7 +830,7 @@ This is an original work of survival fiction. All infections, emergency signals,
       isRetcon: false,
       createdAt: '2026-10-29T00:00:00.000Z',
     };
-    await this.atomicWriteJson(path.join(projectDir, 'canon_ledger.json'), [initialCanon]);
+    this.store.write(path.join(projectDir, 'canon_ledger.json'), [initialCanon]);
 
     const initialClaim: ResearchClaim = {
       id: 'claim_001',
@@ -756,10 +850,10 @@ This is an original work of survival fiction. All infections, emergency signals,
       createdAt: '2026-10-29T00:00:00.000Z',
       updatedAt: '2026-10-29T00:00:00.000Z',
     };
-    await this.atomicWriteJson(path.join(projectDir, 'research_claims.json'), [initialClaim]);
-    await this.atomicWriteJson(path.join(projectDir, 'jobs.json'), []);
-    await this.atomicWriteJson(path.join(projectDir, 'packages.json'), []);
-    await this.atomicWriteJson(path.join(projectDir, 'autoproduce_runs.json'), []);
+    this.store.write(path.join(projectDir, 'research_claims.json'), [initialClaim]);
+    this.store.write(path.join(projectDir, 'jobs.json'), []);
+    this.store.write(path.join(projectDir, 'packages.json'), []);
+    this.store.write(path.join(projectDir, 'autoproduce_runs.json'), []);
   }
 }
 

@@ -40,10 +40,14 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
   const [isMintingQuickGrant, setIsMintingQuickGrant] = useState(false);
   const [copiedCmd, setCopiedCmd] = useState(false);
 
-  const loadGrants = async () => {
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadGrants = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/spend-grants`);
+      const res = await fetch(`/api/projects/${projectId}/spend-grants`, { signal });
       const data = await res.json();
+      if (signal?.aborted) return;
+      if (!res.ok || !data.ok || !Array.isArray(data.data)) throw new Error(data.error || 'Could not load historical grants');
       if (data.ok && Array.isArray(data.data)) {
         const active = data.data.filter((g: SpendApprovalGrant) => !g.isRevoked && new Date(g.expiresAt).getTime() > Date.now());
         setAvailableGrants(active);
@@ -53,7 +57,7 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
         }
       }
     } catch (err) {
-      console.error('Failed to load spend grants:', err);
+      if (!signal?.aborted) setLoadError(err instanceof Error ? err.message : 'Could not load grants');
     }
   };
 
@@ -82,27 +86,24 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
     }
   };
 
-  const loadRuns = async () => {
+  const loadRuns = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/autoproduce`);
+      const res = await fetch(`/api/projects/${projectId}/autoproduce`, { signal });
       const data = await res.json();
-      if (data.ok && data.data) {
-        setRuns(data.data);
-        if (!selectedRun && data.data.length > 0) {
-          setSelectedRun(data.data[0]);
-        } else if (selectedRun) {
-          const updated = data.data.find((r: AutoproduceRun) => r.runId === selectedRun.runId);
-          if (updated) setSelectedRun(updated);
-        }
-      }
+      if (signal?.aborted) return;
+      if (!res.ok || !data.ok || !Array.isArray(data.data)) throw new Error(data.error || 'Could not load historical runs');
+      setRuns(data.data);
+      setSelectedRun(previous => data.data.find((run: AutoproduceRun) => run.runId === previous?.runId) ?? data.data[0] ?? null);
     } catch (err) {
-      console.error('Failed to load autoproduce runs:', err);
+      if (!signal?.aborted) setLoadError(err instanceof Error ? err.message : 'Could not load runs');
     }
   };
 
   useEffect(() => {
-    loadRuns();
-    loadGrants();
+    const controller = new AbortController();
+    setRuns([]); setSelectedRun(null); setAvailableGrants([]); setApprovalId(''); setLoadError(null);
+    void loadRuns(controller.signal); void loadGrants(controller.signal);
+    return () => controller.abort();
   }, [projectId]);
 
   const handleStartRun = async () => {
@@ -151,6 +152,11 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      <div role="status" className="p-4 rounded-xl border border-amber-500/30 text-amber-200">
+        Production execution and new spend approvals are disabled pending a durable worker, measured asset validation and transactional spending. Historical run statuses are not fresh QC evidence.
+      </div>
+      <p role="status" className="text-sm text-amber-300">Legacy autoproducer metadata is historical only. Start, advance and approval creation are disabled; stage labels are not execution evidence. Use Real Local Render for supplied-asset exports.</p>
+      {loadError && <p role="alert" className="text-sm text-rose-300">Historical inspector failed: {loadError}</p>}
       {/* Header */}
       <div className="border-b border-slate-800 pb-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -162,14 +168,14 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
               Supervised Autoproducer
             </h1>
             <p className="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
-              Resumable end-to-end production pipeline from premise to upload handoff. Automates routine stages within operator-authorized spend caps, pausing before blockers, unknown charges, or public release.
+              Read-only historical pipeline inspector. End-to-end generation and publishing are not implemented; stage statuses do not certify actual execution.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             {!selectedRun ? (
               <button
-                disabled={isStarting}
+                disabled
                 onClick={handleStartRun}
                 className="px-4 py-2 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 shadow-sm transition-colors"
               >
@@ -178,7 +184,7 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
               </button>
             ) : (
               <button
-                disabled={selectedRun.isCompleted || isAdvancing}
+                disabled
                 onClick={handleAdvanceStage}
                 className="px-4 py-2 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 shadow-sm transition-colors disabled:opacity-40"
               >
@@ -228,7 +234,7 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
             />
           </div>
           <span className="text-[10px] text-slate-500 mt-1 block">
-            Hard cap: stops before any paid generation exceeding limit.
+            Planning value only: paid execution is disabled; this field creates no permission.
           </span>
         </div>
 
@@ -237,7 +243,7 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
             <label className="text-slate-400 font-medium">Operator Spend Grant:</label>
             <button
               type="button"
-              disabled={isMintingQuickGrant}
+              disabled
               onClick={handleQuickMintGrant}
               className="text-[10px] text-teal-400 hover:text-teal-300 font-medium"
             >
@@ -271,7 +277,7 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
               />
               <button
                 type="button"
-                onClick={handleQuickMintGrant}
+                disabled onClick={handleQuickMintGrant}
                 className="px-2.5 py-1.5 rounded bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold text-[11px] shrink-0"
               >
                 Authorize
@@ -411,10 +417,10 @@ export const AutoproducerView: React.FC<AutoproducerViewProps> = ({
             No Active Autoproduce Run Initialized
           </h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-            Initialize an end-to-end run for {defaultEpisodeId} to orchestrate script validation, storyboard generation, 2D motion assembly, technical QC, and YouTube packaging.
+            No historical runs for {defaultEpisodeId}. End-to-end execution is unavailable; use the separate real local-render workflow with supplied assets.
           </p>
           <button
-            onClick={handleStartRun}
+            disabled onClick={handleStartRun}
             className="px-4 py-2 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold text-xs inline-flex items-center gap-1.5 shadow-sm"
           >
             <Play className="w-3.5 h-3.5 fill-current" />

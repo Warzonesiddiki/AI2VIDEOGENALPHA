@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Local metadata database and SQLite sidecars
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

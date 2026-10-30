@@ -19,61 +19,29 @@ interface YouTubeViewProps {
 }
 
 export const YouTubeView: React.FC<YouTubeViewProps> = ({ projectId }) => {
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [packages, setPackages] = useState<YouTubePackage[]>([]);
   const [activePackage, setActivePackage] = useState<YouTubePackage | null>(null);
   const [activeTab, setActiveTab] = useState<'runbook' | 'preflight' | 'calendar'>('runbook');
   const [timezone, setTimezone] = useState<string>('Asia/Kolkata');
-  const [checklist, setChecklist] = useState({
-    qcFilePassed: true,
-    scriptFactsReviewed: true,
-    rightsCleared: true,
-    metadataTruthful: true,
-    contentIdSafe: true,
-    policyChecked: true,
-    syntheticDisclosed: true,
-    audienceNotForKids: true,
-    timezoneConfirmed: true,
-    humanUploadApproved: false, // Strict human approval default
-  });
-
-  const loadPackages = async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/youtube`);
-      const data = await res.json();
-      if (data.ok && data.data) {
-        if (data.data.length > 0) {
-          setPackages(data.data);
-          setActivePackage(data.data[0]);
-        } else {
-          // Pre-seed package for S01E001 so the runbook and preflight are immediately actionable
-          await handleGenerateDefaultPackage();
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const emptyChecklist = { qcFilePassed: false, scriptFactsReviewed: false, rightsCleared: false, metadataTruthful: false, contentIdSafe: false, policyChecked: false, syntheticDisclosed: false, audienceNotForKids: false, timezoneConfirmed: false, humanUploadApproved: false };
+  const [checklist, setChecklist] = useState(emptyChecklist);
 
   useEffect(() => {
-    loadPackages();
+    const controller = new AbortController();
+    setPackages([]); setActivePackage(null); setError(''); setLoading(true); setChecklist(emptyChecklist);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/youtube`, { signal: controller.signal });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not load historical packages');
+        if (!controller.signal.aborted) { setPackages(data.data); setActivePackage(data.data[0] ?? null); }
+      } catch (err: any) { if (!controller.signal.aborted) setError(err.message); }
+      finally { if (!controller.signal.aborted) setLoading(false); }
+    })();
+    return () => controller.abort();
   }, [projectId]);
-
-  const handleGenerateDefaultPackage = async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/youtube/package`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ episodeId: 'S01E001' }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setActivePackage(data.data);
-        loadPackages();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -92,17 +60,14 @@ export const YouTubeView: React.FC<YouTubeViewProps> = ({ projectId }) => {
             </p>
           </div>
 
-          {!activePackage && (
-            <button
-              onClick={handleGenerateDefaultPackage}
-              className="px-3.5 py-1.5 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold text-xs transition-colors shrink-0"
-            >
-              Prepare S01E001 Package
-            </button>
-          )}
+
         </div>
       </div>
 
+      <p role="status" className="text-sm text-amber-300">Package creation, upload and publication are disabled. Historical metadata is not execution, QC, rights clearance or approval evidence. Checklist changes below are local notes only.</p>
+      {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
+      {loading && <p>Loading historical packages…</p>}
+      {!loading && !activePackage && <p>No historical packages. Use Real Local Render for measured local exports; it does not create a publishing package.</p>}
       {/* Mode Sub-Tabs */}
       <div className="flex items-center gap-1.5 text-xs">
         <button
@@ -254,7 +219,7 @@ export const YouTubeView: React.FC<YouTubeViewProps> = ({ projectId }) => {
                 <div className="p-2 rounded bg-slate-950 border border-slate-800">
                   <div className="text-slate-500 font-sans">16:9 Long-form Master</div>
                   <div className="text-slate-200 truncate mt-0.5">{activePackage.master16x9Path}</div>
-                  <div className="text-teal-400">{activePackage.master16x9Resolution} · 15:02</div>
+                  <div className="text-teal-400">{activePackage.master16x9Resolution} · reported metadata, not measured QC</div>
                 </div>
 
                 <div className="p-2 rounded bg-slate-950 border border-slate-800">
@@ -269,7 +234,7 @@ export const YouTubeView: React.FC<YouTubeViewProps> = ({ projectId }) => {
                 <div className="p-2 rounded bg-slate-950 border border-slate-800">
                   <div className="text-slate-500 font-sans">Technical QC Report</div>
                   <div className="text-emerald-400">✓ FFprobe Validated: H.264/AAC Stereo</div>
-                  <div className="text-slate-400">Loudness: {activePackage.qcReport.loudnessLufs} LUFS</div>
+                  <div className="text-slate-400">Historical loudness assertion (unverified): {activePackage.qcReport.loudnessLufs ?? 'not measured'}</div>
                 </div>
               </div>
 
@@ -329,9 +294,9 @@ export const YouTubeView: React.FC<YouTubeViewProps> = ({ projectId }) => {
             <span className="text-slate-400 font-mono text-[11px]">
               Gate Status:{' '}
               {Object.values(checklist).every(Boolean) ? (
-                <span className="text-emerald-400 font-bold">ALL 10 CHECKS PASSED (Ready for Upload)</span>
+                <span className="text-emerald-400 font-bold">LOCAL CHECKLIST COMPLETE — NOT UPLOAD AUTHORIZATION</span>
               ) : (
-                <span className="text-amber-400 font-bold">HUMAN APPROVAL REQUIRED FOR CHECK #10</span>
+                <span className="text-amber-400 font-bold">LOCAL CHECKLIST INCOMPLETE — APPROVAL WORKFLOW UNAVAILABLE</span>
               )}
             </span>
           </div>

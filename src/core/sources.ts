@@ -17,7 +17,9 @@ export interface SourceValidationResult {
  * Checks whether an IP or hostname is private/loopback/cloud metadata.
  */
 function isPrivateOrReservedHost(hostname: string): boolean {
-  const lower = hostname.toLowerCase().trim();
+  const lower = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '');
+  // Until a full IP policy is available, reject all IPv6 literal research targets.
+  if (lower.includes(':')) return true;
 
   // Common localhost/loopback representations
   if (

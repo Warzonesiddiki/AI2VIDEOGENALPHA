@@ -46,6 +46,10 @@ export function estimateMediaOperationCost(params: {
   countOrUnits: number; // images count, video seconds, or characters
   retriesAllowed?: number;
 }): { costUsd: number; costBreakdown: string } {
+  if (!Number.isFinite(params.countOrUnits) || params.countOrUnits < 0 ||
+      !Number.isInteger(params.retriesAllowed ?? 0) || (params.retriesAllowed ?? 0) < 0 || (params.retriesAllowed ?? 0) > 10) {
+    throw new Error('Invalid cost estimation units or retry count');
+  }
   const retries = params.retriesAllowed || 0;
   const multiplier = 1 + retries;
 
@@ -91,6 +95,11 @@ export function estimateMediaOperationCost(params: {
 export function evaluateSpendAuthorization(
   req: SpendReservationRequest
 ): SpendReservationResult {
+  const deny = (reason: string): SpendReservationResult => ({ authorized: false, reservedAmountUsd: 0, requiresManualCeilingConfirmation: false, reason });
+  const values = [req.estimatedCostUsd, req.currentMonthlySpentUsd, req.currentEpisodeSpentUsd,
+    req.currentRunSpentUsd, req.caps.perRunCapUsd, req.caps.perEpisodeCapUsd, req.caps.monthlyCapUsd];
+  if (values.some(value => !Number.isFinite(value) || value < 0)) return deny('Spend amounts and caps must be finite nonnegative numbers.');
+
   // 1. Unknown cost check: fails closed
   if (req.isCostEstimateUnknown) {
     return {
@@ -133,7 +142,9 @@ export function evaluateSpendAuthorization(
     };
   }
 
-  // 5. If an explicit approval grant is provided, verify scope & expiry
+  if (!req.approvalGrant) return deny('An explicit operator spend approval grant is required.');
+
+  // 5. Verify the approval grant; this is a decision, NOT a persisted reservation.
   if (req.approvalGrant) {
     if (req.approvalGrant.isRevoked) {
       return {
@@ -145,7 +156,7 @@ export function evaluateSpendAuthorization(
     }
 
     const expiryTime = new Date(req.approvalGrant.expiresAt).getTime();
-    if (Date.now() > expiryTime) {
+    if (!Number.isFinite(expiryTime) || Date.now() >= expiryTime) {
       return {
         authorized: false,
         reservedAmountUsd: 0,
@@ -166,6 +177,15 @@ export function evaluateSpendAuthorization(
       };
     }
 
+    const grant = req.approvalGrant;
+    if (grant.projectId !== req.projectId || (grant.episodeId !== 'all' && grant.episodeId !== req.episodeId)) {
+      return deny('Approval grant project/episode scope does not match this operation.');
+    }
+    if (grant.currency !== req.caps.currency) return deny('Approval grant currency does not match caps.');
+    if (![grant.actualSpentUsd, grant.maxBudgetUsd].every(value => Number.isFinite(value) && value >= 0)) {
+      return deny('Approval grant amounts must be finite nonnegative numbers.');
+    }
+
     if (req.approvalGrant.actualSpentUsd + cost > req.approvalGrant.maxBudgetUsd) {
       return {
         authorized: false,
@@ -180,7 +200,7 @@ export function evaluateSpendAuthorization(
   return {
     authorized: true,
     reservedAmountUsd: cost,
-    reservationId: `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    // No reservation is minted by this pure evaluator. Paid execution remains disabled.
     requiresManualCeilingConfirmation: false,
   };
 }

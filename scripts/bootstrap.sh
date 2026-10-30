@@ -15,7 +15,11 @@ echo ""
 echo -n "[1/5] Checking Node.js runtime... "
 if ! command -v node >/dev/null 2>&1; then
   echo "FAIL"
-  echo "      Node.js is not installed. Please install Node.js v20+ or v22+ LTS."
+  echo "      Node.js is not installed. Please install Node.js 22.13+ (required for SQLite)."
+  exit 1
+fi
+if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 13) ? 0 : 1)'; then
+  echo "FAIL (Node.js 22.13+ required)"
   exit 1
 fi
 NODE_VER=$(node -v)
@@ -38,7 +42,7 @@ if [ ! -f ".env" ]; then
   if [ -f ".env.example" ]; then
     cp .env.example .env
     echo "CREATED (.env copied from .env.example)"
-    echo "      NOTE: Add your GEMINI_API_KEY in .env before running AI ideation."
+    echo "      NOTE: No API key is required for local planning. Paid generation remains disabled."
   else
     echo "MISSING (.env not found)"
   fi
@@ -48,11 +52,11 @@ fi
 
 # 4. Run Unit Tests
 echo -n "[4/5] Running core validation test suite... "
-if npx --yes tsx --test src/**/*.test.ts >/dev/null 2>&1; then
+if npm test >/dev/null 2>&1; then
   echo "PASSED (all tests green)"
 else
   echo "FAIL (Tests reported errors)"
-  npx --yes tsx --test src/**/*.test.ts
+  npm test
   exit 1
 fi
 
@@ -67,7 +71,7 @@ fi
 
 echo ""
 echo "======================================================================"
-echo "  All foundational systems are ready!"
+echo "  Listed local checks passed; this is not production-readiness certification."
 echo ""
 echo "  To start the full-stack web studio:"
 echo "    npm run dev"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ArcRoadmapItem } from '../types/index.ts';
 import { MapPin, Search, Layers, Plus, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
 
@@ -8,6 +8,8 @@ interface RoadmapViewProps {
 }
 
 export const RoadmapView: React.FC<RoadmapViewProps> = ({ projectId, onExpandArcSuccess }) => {
+  const expansionRequest = useRef<{ scope: string; key: string } | null>(null);
+  const expandingRef = useRef(false);
   const [arcs, setArcs] = useState<ArcRoadmapItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSeason, setSelectedSeason] = useState<number | 'all'>('all');
@@ -42,7 +44,10 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({ projectId, onExpandArc
   });
 
   const handleExpandArc = async () => {
-    if (!expandArcNumber) return;
+    if (!expandArcNumber || expandingRef.current) return;
+    expandingRef.current = true;
+    const scope = `${projectId}:${expandArcNumber}:${expandCount}`;
+    if (expansionRequest.current?.scope !== scope) expansionRequest.current = { scope, key: crypto.randomUUID() };
     setIsExpanding(true);
     setExpandNotice(null);
 
@@ -52,14 +57,16 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({ projectId, onExpandArc
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           arcNumber: expandArcNumber,
-          count: Math.min(20, expandCount), // Hard cap at 20 per call
+          count: expandCount,
+          idempotencyKey: expansionRequest.current.key,
         }),
       });
       const data = await res.json();
       if (data.ok) {
         setExpandNotice(
-          `Successfully expanded Arc ${expandArcNumber} into ${data.data.createdCards.length} distinct episode cards!`
+          `Successfully expanded Arc ${expandArcNumber} into ${data.data.createdCards.length} draft episode cards (not continuity-approved)!`
         );
+        expansionRequest.current = null;
         onExpandArcSuccess();
       } else {
         setExpandNotice(`Error: ${data.error}`);
@@ -67,6 +74,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({ projectId, onExpandArc
     } catch (err: any) {
       setExpandNotice(`Failed to expand arc: ${err.message}`);
     } finally {
+      expandingRef.current = false;
       setIsExpanding(false);
     }
   };

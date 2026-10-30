@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Settings,
   Save,
@@ -24,6 +24,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
   const [settings, setSettings] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const generation = useRef(0);
 
   // Spend Grants Management
   const [spendGrants, setSpendGrants] = useState<SpendApprovalGrant[]>([]);
@@ -60,16 +63,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
   };
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then((res) => res.json())
-      .then((res) => {
-        if (res.ok) setSettings(res.data);
+    const controller = new AbortController();
+    generation.current++; setLoading(true); setSettings(null); setError(''); setSaving(false); setSavedNotice(false);
+    fetch('/api/settings', { signal: controller.signal })
+      .then(async res => {
+        const result = await res.json();
+        if (!res.ok || !result.ok) throw new Error(result.error || 'Could not load settings');
+        if (!controller.signal.aborted) setSettings(result.data);
       })
-      .catch((err) => console.error(err))
-      .finally(() => setLoading(false));
+      .catch(err => { if (!controller.signal.aborted) setError(err.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
 
     loadSpendGrants();
     loadEpisodes();
+    return () => { generation.current++; controller.abort(); };
   }, [projectId]);
 
   const handleMintGrant = async (e: React.FormEvent) => {
@@ -119,22 +126,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!settings) return;
-
+    if (!settings || saving) return;
+    const current = generation.current;
+    setSaving(true); setError(''); setSavedNotice(false);
     try {
       const res = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ revision: settings.revision, productionTimezone: settings.productionTimezone, dataNoticeAccepted: settings.dataNoticeAccepted, dataNoticeVersion: settings.dataNoticeVersion }),
       });
       const data = await res.json();
-      if (data.ok) {
-        setSavedNotice(true);
-        setTimeout(() => setSavedNotice(false), 3000);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Could not save settings');
+      if (generation.current !== current) return;
+      setSettings(data.data); setSavedNotice(true);
+    } catch (err: any) {
+      if (generation.current === current) setError(`${err.message} Your draft is retained; reload in another tab to compare before merging.`);
+    } finally { if (generation.current === current) setSaving(false); }
   };
 
   const handleExportProject = async () => {
@@ -155,6 +161,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
     }
   };
 
+  if (!loading && !settings) return <div role="alert" className="p-8 text-rose-300">{error || 'Settings unavailable'}</div>;
   if (loading || !settings) {
     return <div className="p-8 text-center text-xs text-slate-500">Loading settings...</div>;
   }
@@ -186,6 +193,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
         </div>
       </div>
 
+      {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
       {savedNotice && (
         <div className="p-3 rounded bg-slate-900 border border-teal-500/40 text-xs text-teal-300 flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-teal-400" />
@@ -193,7 +201,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
         </div>
       )}
 
-      <form onSubmit={handleSaveSettings} className="space-y-6 text-xs">
+      <form onSubmit={handleSaveSettings} className="space-y-6 text-xs"><fieldset disabled={saving} className="space-y-6">
         {/* Budget Caps Section */}
         <div className="p-5 rounded-lg bg-slate-900 border border-slate-800 space-y-4">
           <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
@@ -201,7 +209,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
             <span>Atomic Budget Caps (USD)</span>
           </h2>
           <p className="text-slate-400 text-[11px]">
-            Master rule enforcement: jobs will automatically pause before any call that would breach these caps.
+            Read-only configured caps. Budget editing and paid execution are disabled pending operator-only approval integration.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -209,6 +217,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
               <label className="text-slate-400 font-medium block mb-1">Per-Run Hard Cap</label>
               <input
                 type="number"
+                disabled
                 value={settings.budgetCaps?.perRunCapUsd || 25}
                 onChange={(e) =>
                   setSettings({
@@ -224,6 +233,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
               <label className="text-slate-400 font-medium block mb-1">Per-Episode Hard Cap</label>
               <input
                 type="number"
+                disabled
                 value={settings.budgetCaps?.perEpisodeCapUsd || 85}
                 onChange={(e) =>
                   setSettings({
@@ -239,6 +249,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
               <label className="text-slate-400 font-medium block mb-1">Monthly Project Cap</label>
               <input
                 type="number"
+                disabled
                 value={settings.budgetCaps?.monthlyCapUsd || 350}
                 onChange={(e) =>
                   setSettings({
@@ -283,7 +294,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
             <span>Third-Party Provider Data Consent</span>
           </h2>
           <p className="text-slate-400 text-[11px] leading-relaxed">
-            Local-first storage keeps files on your disk, but calls to generative models (Gemini API text, Nano Banana stills, Omni Flash clips) send prompts and reference frames to Google Cloud API endpoints subject to their current data-use and retention policies.
+            Local files remain on disk. If external providers are enabled in a future release, prompts and reference assets may leave this device under the selected provider’s current retention policies. Provider capabilities are unverified; paid calls remain disabled. Notice version: {settings.dataNoticeVersion}
           </p>
 
           <label className="flex items-center gap-2.5 p-3 rounded bg-slate-950 border border-slate-800 cursor-pointer">
@@ -294,7 +305,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
               className="accent-teal-400 rounded"
             />
             <span className="text-slate-300">
-              I understand that external model calls transmit prompts off-device, and I authorize API communication within configured spend caps.
+              I acknowledge this data-transmission notice. This is not a spend grant, provider authorization, rights approval or permission to publish.
             </span>
           </label>
         </div>
@@ -305,10 +316,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
             className="px-5 py-2 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold flex items-center gap-1.5 shadow-sm transition-colors"
           >
             <Save className="w-3.5 h-3.5" />
-            <span>Save Settings</span>
+            <span>{saving ? 'Saving…' : 'Save Settings'}</span>
           </button>
         </div>
-      </form>
+      </fieldset></form>
 
       {/* Operator Spend Grants & Agent Authorizations */}
       <div className="p-5 rounded-lg bg-slate-900 border border-slate-800 space-y-5 text-xs">
@@ -319,7 +330,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
               <span>Operator Spend Grants & Agent Authorizations</span>
             </h2>
             <p className="text-slate-400 text-[11px] mt-0.5">
-              Strict Invariant (Rule 2): Automated agents and OpenCode cannot self-mint spend caps. Authorize an expiring grant here and pass the <code className="text-teal-300 font-mono">--approval-id</code> to your terminal agent.
+              Grant creation and revocation are disabled pending the operator-only approval service. Historical grants below are not proof of provider readiness. Automated agents cannot self-mint or widen caps. Future execution will require an operator-issued <code className="text-teal-300 font-mono">--approval-id</code> to your terminal agent.
             </p>
           </div>
           <span className="text-[11px] font-mono text-teal-400 bg-teal-500/10 px-2.5 py-1 rounded border border-teal-500/20 self-start sm:self-auto">
@@ -328,7 +339,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
         </div>
 
         {/* Mint New Grant Form */}
-        <form onSubmit={handleMintGrant} className="p-4 rounded-md bg-slate-950 border border-slate-800 space-y-3">
+        <form onSubmit={handleMintGrant} className="p-4 rounded-md bg-slate-950 border border-slate-800 space-y-3"><fieldset disabled>
           <div className="font-semibold text-slate-200 text-xs">Issue New Scoped Spend Grant</div>
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <div>
@@ -390,7 +401,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
               </button>
             </div>
           </div>
-        </form>
+        </fieldset></form>
 
         {/* Newly Minted Grant Callout */}
         {mintedGrant && (
@@ -435,7 +446,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
           <div className="text-xs font-semibold text-slate-300">Active & Historical Spend Grants</div>
           {spendGrants.length === 0 ? (
             <div className="p-4 rounded bg-slate-950 border border-slate-800 text-center text-slate-500 text-xs">
-              No spend grants recorded yet. Authorize a grant above to permit agent generation.
+              No historical spend grants recorded. New grants and paid generation are disabled.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -490,7 +501,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ projectId }) => {
                             </button>
                             {!grant.isRevoked && !isExpired && (
                               <button
-                                onClick={() => handleRevokeGrant(grant.approvalId)}
+                                disabled onClick={() => handleRevokeGrant(grant.approvalId)}
                                 title="Revoke Grant"
                                 className="px-2 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/80 text-[10px] flex items-center gap-1"
                               >
