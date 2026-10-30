@@ -22,23 +22,23 @@ export function buildStoryOutline(input: StoryBrief) {
   const characters = input.characters.map(value => text(value, 'character', 100));
   if (input.canonNotes !== undefined && (typeof input.canonNotes !== 'string' || input.canonNotes.length > 4000)) throw new Error('Invalid story canon notes');
   const lead = characters[0];
-  const countervoice = characters[1] ?? 'a survivor with a competing responsibility';
+  const countervoice = characters[1] ?? 'another person with a competing responsibility';
   return {
     beats: [
       { name: '1. Contradiction / hook', snippet: `${title}: at ${place}, show one physical detail that contradicts an apparently safe reading. Start inside the problem, not with world history. Premise: ${premise}` },
       { name: '2. Want and private cost', snippet: `${lead} needs a concrete, observable outcome before a visible deadline. Tie failure to a named person's need. Establish what the lead is afraid to admit.` },
       { name: '3. First attempt makes it worse', snippet: `${lead} acts on a plausible but incomplete explanation. The attempt costs time or a scarce resource; its failure reveals a new physical constraint at ${place}.` },
       { name: '4. Two defensible positions', snippet: `${countervoice} wants an incompatible outcome for a credible reason. Give each side evidence; neither becomes foolish just to let the lead win. Let an interrupted task carry the argument.` },
-      { name: '5. Test, reversal, new question', snippet: 'Plant a tangible clue, test a limited hypothesis and show the observable result. Separate observation from inference. The discovery changes the rescue plan without granting anyone knowledge they could not possess.' },
+      { name: '5. Test, reversal, new question', snippet: 'Plant a tangible clue, test a limited hypothesis and show the observable result. Separate observation from inference. The discovery changes the plan without granting anyone knowledge they could not possess.' },
       { name: '6. Irreversible choice', snippet: `${lead} must choose between two specific losses. Name what each option saves and destroys. A promise or earlier mistake makes this choice personal; do not add a convenient third solution.` },
       { name: '7. Earned action / price paid', snippet: `Resolve the immediate objective with a tool, skill or clue established earlier. ${countervoice} contributes a decision, not just an extra pair of hands. Show the cost becoming irreversible.` },
-      { name: '8. Consequence / changed relationship', snippet: 'Give the rescue a quiet human aftermath. Record who was saved, what route/resource is gone and which promise is now harder to keep. Let behavior, not a speech, reveal the changed relationship.' },
-      { name: '9. Payoff that opens the next problem', snippet: 'Close the immediate dramatic question. Recontextualize a planted clue so the ending follows from the choice, not a random new threat. Preserve uncertainty about motive; do not imply supernatural coordination.' },
+      { name: '8. Consequence / changed relationship', snippet: 'Give the outcome a quiet human aftermath. Record what changed, what route/resource is gone and which promise is now harder to keep. Let behavior, not a speech, reveal the changed relationship.' },
+      { name: '9. Payoff that opens the next problem', snippet: 'Close the immediate dramatic question. Recontextualize a planted clue so the ending follows from the choice, not a random new threat. Preserve uncertainty where it serves the supplied story.' },
     ],
     reviewRequired: true as const,
     provenance: 'local-editorial-scaffold' as const,
     canonNotes: input.canonNotes ?? '',
-    constraints: ['Original Ternfall material only.', 'Transmission only through bite/saliva entering broken skin; water is not an infection vector.', 'The Still have no speech, telepathy or deliberate master strategy.', 'No factual, editorial, rights, spend or publication approval is established by this scaffold.'],
+    constraints: ['Use original material grounded in the supplied brief.', 'Review the selected project’s own canon and factual claims separately.', 'No factual, editorial, rights, spend or publication approval is established by this scaffold.'],
   };
 }
 

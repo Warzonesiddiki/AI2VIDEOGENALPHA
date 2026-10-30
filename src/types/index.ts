@@ -108,6 +108,9 @@ export interface ProjectMetadata {
   activeSeriesId: string;
 }
 
+/** Project fields intentionally exposed by browser-facing HTTP endpoints. */
+export type PublicProjectMetadata = Omit<ProjectMetadata, 'productionRoot'>;
+
 export interface WorldRule {
   id: string;
   category: 'infection' | 'infrastructure' | 'signal_pulse' | 'society' | 'geography';
@@ -505,11 +508,146 @@ export interface YouTubePackage {
 }
 
 // ---------------------------------------------------------------------------
+// Browser-safe read projections (server/lib/publicReads.ts)
+// ---------------------------------------------------------------------------
+
+export interface PublicExternalOperation {
+  id: string;
+  operationIntent: string;
+  provider: string;
+  state: ExternalOperationState;
+  mayHaveCharged: boolean;
+  duplicatePossible: boolean;
+  reconciliationRequired: boolean;
+}
+
+export interface PublicJobLogEntry {
+  timestamp: string;
+  level: 'info' | 'warn' | 'error' | 'debug';
+  message: string;
+}
+
+export interface PublicGenerationJob {
+  revision: number;
+  id: string;
+  projectId: string;
+  episodeId?: string;
+  type: string;
+  state: JobState;
+  externalOperation?: PublicExternalOperation;
+  progressPercent: number;
+  retryCount: number;
+  maxRetries: number;
+  estimatedCostUsd?: number;
+  actualCostUsd?: number;
+  logs: PublicJobLogEntry[];
+  inputHash?: string;
+  outputArtifacts: Array<{ name: string; relativePath?: string; hash?: string }>;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface PublicShortVariant {
+  shortId: string;
+  durationSeconds: number;
+  hookDescription: string;
+  fileRecorded: boolean;
+}
+
+export interface PublicPackageQcReport {
+  passed: boolean;
+  audioClippingDetected: boolean;
+  aspectRatioConfirmed: boolean;
+  missingFrames: boolean;
+  loudnessLufs: number | null;
+  issueCount: number;
+  ffprobeRun: boolean;
+}
+
+export interface PublicYouTubePackage {
+  revision: number;
+  projectId: string;
+  id: string;
+  episodeId: string;
+  workingTitle: string;
+  titleOptions: string[];
+  selectedTitle: string;
+  description: string;
+  chapterTimestamps: Array<{ timecode: string; label: string }>;
+  tags: string[];
+  thumbnailRecorded: boolean;
+  master16x9Recorded: boolean;
+  master16x9DurationSeconds?: number;
+  master16x9Resolution?: string;
+  shortsVariants: PublicShortVariant[];
+  captionsSrtRecorded: boolean;
+  captionsVttRecorded: boolean;
+  captionLanguage: string;
+  audienceSetting: 'made_for_kids' | 'not_made_for_kids' | 'unreviewed';
+  ageRestriction: boolean;
+  alteredSyntheticDisclosureChoice: 'disclose' | 'no_disclosure_needed' | 'manual_studio_review';
+  rightsClearanceVerified: boolean;
+  targetPrivacyStatus: 'private' | 'unlisted' | 'public';
+  scheduledTimeIso?: string;
+  productionTimezone: string;
+  humanApprovedForUpload: boolean;
+  humanApprovedForPublish: boolean;
+  qcReport: PublicPackageQcReport;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicAutoproduceStage {
+  stageName: string;
+  label: string;
+  status: JobState;
+  startTime?: string;
+  endTime?: string;
+  costUsd?: number;
+  requiresHumanAction: boolean;
+}
+
+export interface PublicAutoproduceRun {
+  revision: number;
+  runId: string;
+  projectId: string;
+  episodeId: string;
+  profile: AutoproduceProfile;
+  spendApprovalId?: string;
+  budgetCapUsd: number;
+  spentSoFarUsd: number;
+  stages: PublicAutoproduceStage[];
+  currentStageIndex: number;
+  isCompleted: boolean;
+  isPaused: boolean;
+  isCancelled: boolean;
+  blockerSummary?: string;
+  outputPackageRecorded: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicSpendGrant {
+  approvalId: string;
+  issuedBy: string;
+  projectId: string;
+  episodeId: string;
+  maxBudgetUsd: number;
+  currency: string;
+  allowedProviders: string[];
+  expiresAt: string;
+  isRevoked: boolean;
+  actualSpentUsd: number;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Doctor Diagnostics & Capabilities
 // ---------------------------------------------------------------------------
 
 export interface SystemDiagnostics {
-  runtimeEnvironment: 'cloud_preview' | 'local_windows' | 'local_wsl2' | 'local_linux';
+  runtimeEnvironment: 'cloud_preview' | 'local_windows' | 'local_wsl2' | 'local_linux' | 'local_other';
   nodeVersion: string;
   osPlatform: string;
   hardwareProfile?: {
@@ -540,7 +678,7 @@ export interface SystemDiagnostics {
   storage: {
     productionRoot: string;
     isWritable: boolean;
-    isLocalDiskMounted: boolean;
+    isLocalDiskMounted: boolean | null;
     freeSpaceMb?: number;
   };
   ffmpeg: {
@@ -645,6 +783,8 @@ export interface GoogleFlowPlan {
   projectId?: string;
   episodeId: string;
   episodeTitle: string;
+  sourceEpisodeRevision?: number; // Snapshot used to build prompts; missing on legacy plans.
+  sourceState?: 'current' | 'stale' | 'unknown' | 'missing_episode'; // Computed on read, not persisted.
   mode: 'dense_24fps' | 'keyframe_storyboard';
   totalDurationSeconds: number; // 600 seconds (10 minutes)
   fps: number; // 24 fps

@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { LocalRenderJob } from '../../server/localMedia.ts';
+import type { PublicLocalRenderJob } from '../../server/localMedia.ts';
 
 /** Real local-only execution. No synthetic player fallback and no provider spend. */
 export function LocalRenderPanel({ projectId, episodeId }: { projectId: string; episodeId: string }) {
   const [frames, setFrames] = useState(24);
   const [audio, setAudio] = useState('narration.wav');
-  const [jobs, setJobs] = useState<LocalRenderJob[]>([]);
+  const [jobs, setJobs] = useState<PublicLocalRenderJob[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const idempotency = useRef(crypto.randomUUID());
@@ -21,7 +21,7 @@ export function LocalRenderPanel({ projectId, episodeId }: { projectId: string; 
         const response = await fetch(base, { signal: controller.signal });
         const result = await response.json();
         if (!response.ok || !result.ok) throw new Error(result.error || 'Could not load local renders');
-        if (!controller.signal.aborted) setJobs(result.data.filter((job: LocalRenderJob) => job.episodeId === episodeId));
+        if (!controller.signal.aborted) setJobs(result.data.filter((job: PublicLocalRenderJob) => job.episodeId === episodeId));
       } catch (error: any) { if (!controller.signal.aborted) setError(error.message); }
     };
     void load(); const timer = setInterval(() => { void load(); }, 2000);
@@ -68,7 +68,7 @@ export function LocalRenderPanel({ projectId, episodeId }: { projectId: string; 
           {job.progress && <p className="text-slate-300">Video segments: {job.progress.completedSegments}/{job.progress.totalSegments} · encoded this attempt: {job.progress.encodedSegments} · revalidated/reused: {job.progress.reusedSegments}</p>}
           {job.error && <p className="text-rose-300 whitespace-pre-wrap break-words">{job.error}</p>}
           {job.qc?.passed && <p className="text-teal-300">Measured: {job.qc.frameCount} frames · {job.qc.width}×{job.qc.height} · {job.qc.loudnessLufs} LUFS · {job.qc.truePeakDb} dBTP</p>}
-          {!['queued', 'running'].includes(job.state) && ((job.checkpoints?.length ?? 0) > 0 || (job.retiredCheckpointTokens?.length ?? 0) > 0) && <button disabled={busy} onClick={() => { if (window.confirm('Delete this render’s cached video segments? Source assets and exported masters are retained. A retry will re-encode removed segments.')) void action(`/${job.id}/purge-checkpoints`); }} className="underline text-amber-300 mr-3">Delete cached segments</button>}
+          {!['queued', 'running'].includes(job.state) && ((job.checkpoints?.length ?? 0) > 0 || job.retiredCheckpointCount > 0) && <button disabled={busy} onClick={() => { if (window.confirm('Delete this render’s cached video segments? Source assets and exported masters are retained. A retry will re-encode removed segments.')) void action(`/${job.id}/purge-checkpoints`); }} className="underline text-amber-300 mr-3">Delete cached segments</button>}
           {['queued', 'running'].includes(job.state) && <button disabled={busy} onClick={() => { void action(`/${job.id}/cancel`); }} className="underline text-amber-300">Cancel</button>}
           {['failed', 'interrupted', 'cancelled'].includes(job.state) && <button disabled={busy} onClick={() => { void action(`/${job.id}/retry`); }} className="underline text-teal-300">Retry with current input files</button>}
         </div>)}

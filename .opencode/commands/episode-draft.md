@@ -1,17 +1,7 @@
 # Command: /episode-draft
 
-Draft full spoken narration for an episode adhering to 15-minute pacing (2,100–2,400 words at 140–160 WPM).
-
-## Execution Steps:
-1. Fetch target episode card:
-   ```bash
-   npm run studio -- episode show $EPISODE_ID --json
-   ```
-2. Draft spoken narration incorporating 9-beat anchor structure.
-3. Validate spoken word count & pacing:
-   - Must be between 2,100 and 2,400 words for standard ~15:00 runtime.
-4. Run canon invariant check:
-   ```bash
-   npm run studio -- episode check $EPISODE_ID --json
-   ```
-5. Save new version and request human editorial review.
+1. Confirm the selected project and episode. Obtain context using the typed CLI with operator authorization.
+2. Draft original material consistent with the supplied project-specific canon; do not import Ternfall lore into a different project.
+3. Word count and speaking rate are rough estimates; a target is not measured runtime or a quality guarantee.
+4. Save a new immutable version only when explicitly requested, using revision-aware documented commands. Reload on conflict; never rewrite historical versions.
+5. Request independent human editorial and rights review. Automated checks do not approve a script or authorize production.

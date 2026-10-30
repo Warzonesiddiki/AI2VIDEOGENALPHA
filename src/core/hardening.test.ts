@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateSpendAuthorization, type SpendReservationRequest } from './budget.ts';
-import { calculateFlowBatchRequirements, createFlowAutoproduceOrchestrator, generateFfmpeg24fpsStitchScript } from './flow.ts';
+import { calculateFlowBatchRequirements, createFlowAutoproduceOrchestrator, createGoogleFlowPlan, computeFlowCheckpoint, generateFfmpeg24fpsStitchScript } from './flow.ts';
 import { validateResearchSourceUrl } from './sources.ts';
 
 function request(): SpendReservationRequest {
@@ -42,14 +42,13 @@ test('planning bounds prohibit unbounded allocation and invalid script identifie
   assert.throws(() => generateFfmpeg24fpsStitchScript('p', 'e', 24, '$(id)'));
 });
 
-test('plan creation cannot certify frames or QC before execution', () => {
-  const result = createFlowAutoproduceOrchestrator('p', 'e', 'Original title', 'Original logline', { durationSeconds: 1 });
-  assert.equal(result.stageReached, 'planned');
-  assert.equal(result.totalFramesVerified, 0);
-  assert.equal(result.totalBatchesProcessed, 0);
-  assert.equal(result.qcStatus.passed, false);
-  assert.equal(result.qcStatus.loudnessLufs, null);
-  assert.equal(result.checkpoint.isComplete, false);
+test('draft planning cannot certify frames or produce an automatic run', () => {
+  assert.throws(() => createFlowAutoproduceOrchestrator('p', 'e', 'Original title', 'Original logline', { durationSeconds: 1 }), /unavailable/);
+  const plan = createGoogleFlowPlan('e', 'Original title', 1, 24, 'dense_24fps', 'p');
+  assert.equal(plan.summary.totalFramesIngested, 0);
+  assert.equal(plan.summary.verifiedBatches, 0);
+  assert.ok(plan.batches.every(batch => batch.status === 'pending' && !batch.verification));
+  assert.equal(computeFlowCheckpoint(plan).isComplete, false);
 });
 
 test('URL guard rejects IPv6 literal loopback and mapped private addresses', () => {

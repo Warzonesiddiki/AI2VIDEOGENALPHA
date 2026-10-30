@@ -16,7 +16,7 @@ data/production_root/projects/<project>/assets/flow_renders/<episode>/frame_0000
 
 Use exact global names across batches. Batch 2 starts at `frame_00025.png`, not `frame_00001.png`. The final batch requires only its expected frames. Every frame must fully decode as a single 1920×1080 PNG, within the size/pixel limits shared with the local media renderer.
 
-The Google Flow batch panel now offers **Verify N Existing Frames**, not simulated ingestion. Verification reads actual files and stores versioned evidence: global index, canonical basename, SHA-256, dimensions, byte size and check timestamp. It never creates images or accepts caller-supplied filenames as proof. Explicit `simulate` fields (even false) and filename claims are rejected, so old simulation clients fail rather than silently changing behavior.
+The Google Flow batch panel now offers **Verify existing PNGs**, not simulated ingestion. Verification reads actual files and stores versioned evidence: global index, canonical basename, SHA-256, dimensions, byte size and check timestamp. It never creates images or accepts caller-supplied filenames as proof. Explicit `simulate` fields (even false) and filename claims are rejected, so old simulation clients fail rather than silently changing behavior.
 
 The typed CLI can also verify a batch:
 
@@ -36,7 +36,17 @@ Content-Type: application/json
 {"episodeId":"S01E001","batchId":"GF_S01E001_B0002","expectedRevision":3}
 ```
 
-The caller must use the revision returned by the latest plan GET. Verification is all-or-nothing for that batch. Missing/corrupt frames cannot partially certify a new batch. If an explicit recheck discovers a previously verified batch is bad, its old evidence is revoked and the plan revision increments, unless a newer concurrent plan has already replaced it. Verification never overwrites that newer plan.
+The caller must use the revision returned by the latest plan GET. Missing/corrupt frames cannot partially certify a new batch. For an already verified batch, an explicit recheck first commits its transition to **pending** and revokes the old evidence before opening any frames. A successful recheck commits fresh evidence in a second revision. A failed read or crash **before** the final commit leaves that revoked revision pending unless a concurrent writer has since committed a newer plan. Compare-and-swap protects the newer plan at both commits. While a recheck is running, other readers can see the pending state.
+
+If the initial revocation reports an error, the recheck does **not** inspect any frame; the old evidence may remain or the revocation may already have committed. A final write can likewise report an error after its commit, leaving fresh evidence stored. An error or lost response therefore does not prove either outcome: resolve any storage issue and reload the plan before deciding whether to recheck or rely on a checkpoint. The browser clears the old summary/badges after a mutation and disables plan preparation if the latest state cannot be reloaded. A previously unverified batch still needs only the final successful commit. Evidence remains point-in-time: later file changes do not automatically revoke it.
+
+Flow routes return fixed, no-store validation/conflict responses and a generic internal error for unexpected failures rather than exposing exception messages or missing-frame filesystem paths. A generic error does not prove whether a mutation or evidence revocation committed; inspect current state and recheck. This protection does not yet cover every API route or all historical document fields.
+
+## Episode provenance and bounded responses
+
+New plans snapshot the selected episode's revision and build draft prompts from its own fields. Plans with an absent source revision are **unknown**; after an episode edit they are **stale**. Unknown or stale plans cannot be verified or used as checkpoints; explicitly replace the plan using its latest plan revision. Replacement clears recorded verification evidence but never deletes supplied files. Saving verification checks both episode and plan revisions in the same transaction, so a concurrent source edit cannot be certified as current.
+
+The browser requests summary and paged batches rather than transferring the full plan. The current server still reads/parses the entire plan internally, so pagination is not a guarantee of low server memory usage. Existing historical plans and prompts remain readable until deliberately replaced.
 
 ## Checkpoints find gaps
 
@@ -65,10 +75,10 @@ npm run studio -- flow status --episode S01E001 --json
 npm run studio -- flow plan --episode S01E001 --duration 60 --mode dense_24fps --expected-revision <n> --json
 ```
 
-Revision protection currently covers **episodes and Flow plans**. Other full-replacement record types still need equivalent conflict handling; collections already use transactional updates. There is no automatic merge UI yet.
+Revision protection covers episodes, Flow plans and several other records, including settings and series; see [configuration revisions](configuration-revisions.md). Saves refuse to advance beyond the JavaScript safe-integer limit and do not reset exhausted tokens automatically. A recheck of already verified evidence at the next-to-last revision can commit revocation using the last safe revision, then fail to commit new evidence; the stored batch remains pending. Inspect current state and seek operator review. Revision checks are not a complete schema or concurrency guarantee for every record type. There is no automatic merge UI yet.
 
 Some legacy plans overallocated their last batch or stored incorrect timecodes. Regenerate those plans deliberately using the latest revision before verifying them; source media is preserved. Prior simulated verification is not carried forward as real evidence.
 
 ## Still disabled or limited
 
-Paid generation, arbitrary batch-status changes, the legacy autoproducer, fake account telemetry and public publication remain disabled. The separate verified local export worker remains limited to 1–60 seconds. No rights/editorial approvals are implied by image verification or technical QC.
+Paid generation, arbitrary batch-status changes, the legacy autoproducer, fake account telemetry and public publication remain disabled. The separate supplied-asset local export worker accepts 24–21,600 frames at 24 fps (1–900 seconds); the opt-in 900-second fixture is not part of routine tests. No rights/editorial approvals are implied by image verification or technical QC.

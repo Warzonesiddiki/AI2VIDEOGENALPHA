@@ -39,7 +39,7 @@ export const SeriesRoomView: React.FC<SeriesRoomViewProps> = ({ bible, onUpdateB
           <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
             <span>Target: ~{bible.targetRuntimeMinutes}m</span>
             <span aria-hidden="true">·</span>
-            <span>{bible.targetWpm} WPM (~2,175 words)</span>
+            <span>{bible.targetWpm} WPM (~{Math.round(bible.targetWpm * bible.targetRuntimeMinutes)} words)</span>
           </div>
         </div>
       </div>
@@ -54,7 +54,7 @@ export const SeriesRoomView: React.FC<SeriesRoomViewProps> = ({ bible, onUpdateB
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          World Rules & The Still
+          World Rules
         </button>
         <button
           onClick={() => setActiveSection('characters')}
@@ -104,10 +104,10 @@ export const SeriesRoomView: React.FC<SeriesRoomViewProps> = ({ bible, onUpdateB
           <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-5">
             <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 text-teal-400" />
-              <span>Invariable Fictional Rules of the Outbreak</span>
+              <span>Stored fictional world rules</span>
             </h2>
             <p className="text-xs text-slate-400 mt-1">
-              These rules govern the fictional world of Ternfall. Script drafts and outlines are checked against them to avoid magical tropes, airborne panic clichés, or continuity drift.
+              These are the selected series’ stored rules. Automated checks do not validate the complete bible or continuity; independent editorial review is required.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
@@ -232,7 +232,7 @@ export const SeriesRoomView: React.FC<SeriesRoomViewProps> = ({ bible, onUpdateB
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
             <div className="space-y-4">
               <div>
-                <div className="text-slate-400 font-medium mb-1">Approved Medium & Treatment:</div>
+                <div className="text-slate-400 font-medium mb-1">Stored Medium & Treatment:</div>
                 <div className="p-3.5 rounded bg-slate-950 border border-slate-800 text-slate-200 leading-relaxed">
                   {bible.visualBible.medium}
                 </div>
@@ -305,7 +305,7 @@ export const SeriesRoomView: React.FC<SeriesRoomViewProps> = ({ bible, onUpdateB
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-5">
             <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-3">
               <MapPin className="w-4 h-4 text-teal-400" />
-              <span>Key Canonical Locations in Ternfall</span>
+              <span>Stored Locations</span>
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {bible.locations.map((loc) => (
@@ -325,15 +325,15 @@ export const SeriesRoomView: React.FC<SeriesRoomViewProps> = ({ bible, onUpdateB
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 space-y-4">
           <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-teal-400" />
-            <span>Originality & IP Clearance Declarations</span>
+            <span>Stored originality declarations</span>
           </h2>
           <p className="text-xs text-slate-400 leading-relaxed">
-            Every episode generated or produced in Ternfall Studio must respect strict commercial rights:
+            These statements are not rights clearance or proof of originality. A human must independently review the exact assets and their provenance.
           </p>
           <div className="space-y-2">
             {bible.originalityDeclarations.map((decl, i) => (
               <div key={i} className="p-3 rounded bg-slate-950 border border-slate-800 text-xs text-slate-300 flex items-start gap-2">
-                <span className="text-teal-400 font-bold shrink-0">✓</span>
+                <span className="text-teal-400 font-bold shrink-0">•</span>
                 <span>{decl}</span>
               </div>
             ))}

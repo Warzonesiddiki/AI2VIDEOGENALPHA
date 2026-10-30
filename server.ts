@@ -1,5 +1,6 @@
 import { apiErrorBoundary } from './server/lib/apiErrors.ts';
 import { localMedia } from './server/localMedia.ts';
+import { createMediaWorkerTick } from './server/lib/mediaWorkerPolling.ts';
 import 'dotenv/config';
 import { operatorAccess } from './server/lib/access.ts';
 /**
@@ -35,14 +36,11 @@ async function startServer() {
   await storage.init();
   localMedia.recoverInterrupted();
   // Each process may poll, but SQLite permits only one active local render per root.
-  let workerBusy = false;
-  const tick = async () => {
-    if (workerBusy) return;
-    workerBusy = true;
-    try { await localMedia.runNext(); }
-    catch (error) { console.error('[LocalMedia] Worker error:', error); }
-    finally { workerBusy = false; }
-  };
+  // Periodic recovery also handles a different worker dying after this server started.
+  const tick = createMediaWorkerTick(localMedia, {
+    onError: error => console.error('[LocalMedia] Worker error:', error),
+    onRecoveryError: error => console.error('[LocalMedia] Recovery error; will retry:', error),
+  });
   setInterval(() => { void tick(); }, 1000).unref();
 
   // Mount API endpoints

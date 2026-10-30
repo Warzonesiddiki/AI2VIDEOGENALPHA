@@ -1,8 +1,8 @@
 /**
- * Ternfall Studio - Untrusted Source Validation & Security Guardrails
- * Protects against SSRF, loopback/private IP calls, malicious redirects,
- * and embedded prompt injection in research notes.
- * Adheres strictly to Master Project Rules & Matrix 15 (C-01, C-02, S-02).
+ * Advisory checks for research notes. These functions do not fetch sources.
+ * Literal-host screening does not validate DNS, redirects or all reserved IP ranges,
+ * and pattern matching cannot prove text safe from prompt injection. Never use
+ * either result as authorization for network access, tools, or approvals.
  */
 
 export interface SourceValidationResult {
@@ -60,7 +60,7 @@ function isPrivateOrReservedHost(hostname: string): boolean {
 }
 
 /**
- * Validates external research URLs against SSRF, unauthorized protocols, and malformed inputs.
+ * Screens URL syntax, protocols and some literal/local hosts; not safe-fetch authorization.
  */
 export function validateResearchSourceUrl(rawUrl: string): SourceValidationResult {
   const warnings: string[] = [];
@@ -124,7 +124,7 @@ export function validateResearchSourceUrl(rawUrl: string): SourceValidationResul
 }
 
 /**
- * Sanitizes scraped or imported research text to detect and quarantine prompt-injection patterns.
+ * Flags a few known patterns and bounds text length; absence of a match does not establish safety.
  */
 export function sanitizeUntrustedResearchContent(content: string): {
   isSafe: boolean;

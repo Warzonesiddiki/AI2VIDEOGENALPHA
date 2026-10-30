@@ -88,7 +88,7 @@ test('episode/plan writes snapshot caller input and reject new-record revisions 
   assert.equal((await store.getEpisode(project, source.id))?.workingTitle, 'Snapshot title');
   const plan = createGoogleFlowPlan(source.id, 'Original plan', 1, 24, 'dense_24fps', project);
   plan.revision = 9; await assert.rejects(store.saveGoogleFlowPlan(project, plan));
-  plan.revision = 0; const pending = store.saveGoogleFlowPlan(project, plan); plan.episodeTitle = 'Mutated'; await pending;
+  plan.revision = 0; plan.sourceEpisodeRevision = episode.revision ?? 0; const pending = store.saveGoogleFlowPlan(project, plan); plan.episodeTitle = 'Mutated'; await pending;
   assert.equal((await store.getGoogleFlowPlan(project, source.id))?.episodeTitle, 'Original plan');
 });
 

@@ -1,22 +1,5 @@
 # Command: /episode-produce
 
-Run supervised autoproduction pipeline on an approved episode card.
+Automated episode production, paid provider calls and publishing are disabled. Do not issue an episode-produce command, attempt to create or widen a spend approval, or imply that a grant enables a disabled workflow.
 
-## Execution Rules:
-- An explicit, human-issued `--approval-id` is REQUIRED.
-- The command CANNOT publish publicly or schedule without separate interactive confirmation.
-
-## Execution Steps:
-1. Verify system readiness:
-   ```bash
-   npm run studio -- doctor --json
-   ```
-2. Trigger supervised production:
-   ```bash
-   npm run studio -- episode produce --episode $EPISODE_ID --profile supervised --approval-id $APPROVAL_ID --json
-   ```
-3. Monitor pipeline status:
-   ```bash
-   npm run studio -- run status $RUN_ID --json
-   ```
-4. Output tailored Studio upload runbook for the human operator.
+For an explicitly requested local render, direct the operator to the supplied-asset Local Render workflow. Inspect measured technical QC, and distinguish it from editorial approval, rights clearance and publication authorization.

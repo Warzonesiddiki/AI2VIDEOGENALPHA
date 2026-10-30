@@ -68,18 +68,27 @@ test('formatSecondsToTimecode: correctly formats standard and fractional second 
   assert.equal(formatSecondsToTimecode(600), '10:00.000');
 });
 
-test('generateBatchFramePrompt: enforces Ternfall canon character ingredients and negative prompts', () => {
-  const prompt = generateBatchFramePrompt(1, 1, 600, 'The Pressure Drop');
-
+test('frame prompts use supplied episode context and explicitly identify missing visual notes', () => {
+  const prompt = generateBatchFramePrompt(1, 1, 2, 'Cross the ridge', 24, 'dense_24fps', {
+    episodeId: 'S02E004', episodeTitle: 'Alpine Rescue', logline: 'A medic crosses a snowy ridge.', visualDescription: 'A medic in a blue coat.'
+  });
   assert.equal(prompt.frameIndex, 1);
   assert.equal(prompt.globalFrameNumber, 1);
   assert.equal(prompt.timecode, '00:00.000');
-  assert.ok(prompt.promptText.includes('Rhea Mistry'));
-  assert.ok(prompt.promptText.includes('water engineer'));
-  assert.ok(prompt.promptText.includes('South Gate'));
-  assert.ok(prompt.negativePrompt.includes('anime'));
-  assert.ok(prompt.negativePrompt.includes('manhwa'));
-  assert.equal(prompt.negativePrompt, TERNFALL_NEGATIVE_PROMPT);
+  assert.match(prompt.promptText, /DRAFT.*Alpine Rescue.*S02E004/);
+  assert.match(prompt.promptText, /medic in a blue coat/);
+  assert.doesNotMatch(prompt.promptText, /Rhea|South Gate/);
+  assert.equal(prompt.negativePrompt, '');
+  assert.match(generateBatchFramePrompt(1, 1, 1, 'Unspecified').promptText, /No visual note supplied/);
+});
+
+test('different episodes generate different draft context rather than fixed pilot prompts', () => {
+  const a = createGoogleFlowPlan('S01E001', 'Forest', 1, 24, 'dense_24fps', 'proj_a', { logline: 'A forest fire.', beats: [{ name: 'Smoke', visualDescription: 'Ash falls.' }] });
+  const b = createGoogleFlowPlan('S01E002', 'Mountain', 1, 24, 'dense_24fps', 'proj_a', { logline: 'An alpine rescue.', beats: [{ name: 'Snow', visualDescription: 'Wind rises.' }] });
+  assert.notEqual(a.batches[0].prompts[0].promptText, b.batches[0].prompts[0].promptText);
+  assert.match(a.batches[0].prompts[0].promptText, /Ash falls/);
+  assert.match(b.batches[0].prompts[0].promptText, /Wind rises/);
+  assert.doesNotMatch(b.batches[0].prompts[0].promptText, /Rhea|South Gate/);
 });
 
 test('createGoogleFlowPlan: maintains $0.00 billable API spend invariant and allocates exact partial batches without inventing account telemetry', () => {
@@ -153,15 +162,8 @@ test('generateCompleteYouTubeRenderScript: retired generator returns no executab
   assert.throws(() => generateCompleteYouTubeRenderScript('proj_ternfall_01', 'S01E001'), /Legacy media scripts are retired/);
 });
 
-test('generateYouTubeMetadataPackage: formats high-CTR titles, chapters, and required disclosures', () => {
-  const pkg = generateYouTubeMetadataPackage('S01E001', 'The Eight-Beat Failure', 'Rhea discovers silent alarm.');
-
-  assert.equal(pkg.titles.length, 3);
-  assert.ok(pkg.selectedTitle.includes('The Eight-Beat Failure'));
-  assert.ok(pkg.description.includes('00:00'));
-  assert.ok(pkg.description.includes('CHAPTER TIMESTAMPS'));
-  assert.ok(pkg.syntheticMediaDisclosure.length > 20);
-  assert.ok(pkg.tags.includes('Ternfall'));
+test('generateYouTubeMetadataPackage: retired instead of inventing publishing metadata', () => {
+  assert.throws(() => generateYouTubeMetadataPackage('S01E001', 'Title', 'Logline'), /metadata generation is retired/);
 });
 
 test('computeFlowCheckpoint: calculates accurate progress and resume batch index', () => {
@@ -184,27 +186,9 @@ test('computeFlowCheckpoint: calculates accurate progress and resume batch index
   assert.equal(resumePoint.remainingBatches, 2);
 });
 
-test('createFlowAutoproduceOrchestrator: prepares a plan without claiming completed production', () => {
-  const result = createFlowAutoproduceOrchestrator(
-    'proj_ternfall_01',
-    'S01E001',
-    'The Eight-Beat Failure',
-    'When the city alarm falls silent...',
-    { durationSeconds: 600, fps: 24 }
-  );
-
-  assert.equal(result.success, true);
-  assert.equal(result.episodeId, 'S01E001');
-  assert.equal(result.stageReached, 'planned');
-  assert.equal(result.billableCostUsd, 0); // Strict $0.00
-  assert.equal(result.totalBatchesProcessed, 0);
-  assert.equal(result.totalFramesVerified, 0);
-  assert.ok(result.master16x9Path.includes('1080p_24fps_Master.mp4'));
-  assert.ok(result.short9x16Path.includes('YouTube_Short_Vertical_1080x1920.mp4'));
-  assert.equal(result.qcStatus.loudnessLufs, null);
-  assert.equal(result.qcStatus.passed, false);
+test('createFlowAutoproduceOrchestrator: retired rather than inventing deliverables', () => {
+  assert.throws(() => createFlowAutoproduceOrchestrator('proj_ternfall_01', 'S01E001', 'Title', 'Logline'), /Automatic production is unavailable/);
 });
-
 
 test('partial batches, keyframe timing and non-24fps prompts match the actual plan', () => {
   const keyframes = createGoogleFlowPlan('ep', 'Title', 25, 24, 'keyframe_storyboard', 'project_b');

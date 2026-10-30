@@ -1,5 +1,7 @@
 # Ternfall Studio — deep follow-up audit
 
+> Historical point-in-time review. Later remediation, browser validation and current open risks are recorded in the [fresh research audit](research-audit-and-remediation-2026-10-30.md) and [progress ledger](remediation-progress.md); the evidence and exclusions below describe the earlier review.
+
 **Date:** 2026-10-30
 **Checkout:** `Warzonesiddiki/AI2VIDEOGENALPHA`, branch `arena/33152e57-ai2videogenalpha`
 **Scope:** cumulative uncommitted remediation through Batch 15, not just the original main-branch code. Line locations below refer to the inspected working tree and may move as remediation continues.

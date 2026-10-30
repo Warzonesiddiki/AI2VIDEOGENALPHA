@@ -22,9 +22,7 @@ import {
 export const DoctorView: React.FC = () => {
   const [diag, setDiag] = useState<SystemDiagnostics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [cliInput, setCliInput] = useState('studio doctor --json');
-  const [cliExecuting, setCliExecuting] = useState(false);
-  const [cliOutput, setCliOutput] = useState<string | null>(null);
+  const [error, setError] = useState('');
   const [copiedPreset, setCopiedPreset] = useState<string | null>(null);
 
   const handleCopy = (text: string, id: string) => {
@@ -33,31 +31,16 @@ export const DoctorView: React.FC = () => {
     setTimeout(() => setCopiedPreset(null), 2000);
   };
 
-  const handleExecuteCli = async (cmd: string) => {
-    setCliExecuting(true);
-    try {
-      const res = await fetch('/api/cli/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: cmd }),
-      });
-      const data = await res.json();
-      setCliOutput(data.output || JSON.stringify(data, null, 2));
-    } catch (err: any) {
-      setCliOutput(`Error: ${err.message}`);
-    } finally {
-      setCliExecuting(false);
-    }
-  };
-
   const fetchDiagnostics = async () => {
     setLoading(true);
+    setError('');
     try {
       const res = await fetch('/api/doctor');
       const data = await res.json();
-      if (data.ok) setDiag(data.data);
-    } catch (err) {
-      console.error(err);
+      if (!res.ok || !data.ok) throw new Error(data.error || `Diagnostics failed (${res.status})`);
+      setDiag(data.data);
+    } catch (err: any) {
+      setError(err.message || 'Diagnostics failed');
     } finally {
       setLoading(false);
     }
@@ -80,7 +63,7 @@ export const DoctorView: React.FC = () => {
               Doctor Diagnostics
             </h1>
             <p className="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">
-              Real-time audit of local vs cloud preview runtime, storage permissions, FFmpeg/FFprobe binaries, OpenCode CLI, and provider adapters with strict credential redaction.
+              Inspect selected runtime properties, storage permissions and installed executable versions. Provider connectivity and credential redaction are not verified.
             </p>
           </div>
 
@@ -95,8 +78,11 @@ export const DoctorView: React.FC = () => {
         </div>
       </div>
 
-      {loading || !diag ? (
+      {error && diag && !loading && <div role="alert" className="p-3 text-sm text-rose-300">{error}. Displayed diagnostics are from the previous check.</div>}
+      {loading ? (
         <div className="p-12 text-center text-xs text-slate-500">Scanning environment capabilities...</div>
+      ) : !diag ? (
+        <div role="alert" className="p-6 text-sm text-rose-300">{error || 'Diagnostics are unavailable.'}</div>
       ) : (
         <div className="space-y-6 text-xs">
           {/* Environment Mode Banner */}
@@ -112,7 +98,7 @@ export const DoctorView: React.FC = () => {
               <div>
                 <div className="font-semibold text-sm">
                   {diag.runtimeEnvironment === 'cloud_preview'
-                    ? 'Cloud Preview Container (Ready for Local Windows / WSL2 Deployment)'
+                    ? 'Cloud preview container (local deployment not verified)'
                     : 'Local Runtime'}
                 </div>
                 <div className="text-[11px] opacity-80 mt-0.5">
@@ -153,7 +139,7 @@ export const DoctorView: React.FC = () => {
                 </div>
                 <div className="flex justify-between items-center text-slate-400">
                   <span>Available Disk Space:</span>
-                  <span className="text-slate-200">~{diag.storage.freeSpaceMb} MB</span>
+                  <span className="text-slate-200">{diag.storage.freeSpaceMb === undefined ? 'Not measured' : `~${diag.storage.freeSpaceMb} MB`}</span>
                 </div>
               </div>
             </div>
@@ -168,17 +154,17 @@ export const DoctorView: React.FC = () => {
                 <div className="flex justify-between items-center text-slate-400">
                   <span>FFmpeg Binary:</span>
                   <span className={diag.ffmpeg.installed ? 'text-emerald-400' : 'text-slate-500'}>
-                    {diag.ffmpeg.installed ? 'Detected' : 'Unattached in Cloud'}
+                    {diag.ffmpeg.installed ? 'Detected' : 'Not detected'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-slate-400">
                   <span>FFprobe Validator:</span>
                   <span className={diag.ffmpeg.ffprobeAvailable ? 'text-emerald-400' : 'text-slate-500'}>
-                    {diag.ffmpeg.ffprobeAvailable ? 'Ready' : 'Not attached'}
+                    {diag.ffmpeg.ffprobeAvailable ? 'Detected' : 'Not detected'}
                   </span>
                 </div>
                 <div className="p-2 rounded bg-slate-950 border border-slate-800/80 text-[10px] text-slate-400">
-                  Export project to run real local FFmpeg renders on your Windows PC.
+                  Local rendering also requires compatible binaries and operator-supplied assets; detection does not establish readiness.
                 </div>
               </div>
             </div>
@@ -192,7 +178,7 @@ export const DoctorView: React.FC = () => {
               <div className="space-y-2 text-[11px] font-mono">
                 <div className="flex justify-between items-center text-slate-400">
                   <span>OpenCode CLI:</span>
-                  <span className="text-slate-500">WSL2 Supported</span>
+                  <span className="text-slate-500">{diag.opencode.installed ? `Detected (${diag.opencode.cliVersion})` : 'Not detected'}</span>
                 </div>
                 <div className="flex justify-between items-center text-slate-400">
                   <span>Timezone Anchor:</span>
@@ -215,7 +201,7 @@ export const DoctorView: React.FC = () => {
               <span>Provider & Modality Capability Matrix</span>
             </h3>
             <p className="text-slate-400 text-[11px]">
-              Active API model routes with checked dates and cost bases. Keys and tokens are kept server-side only.
+              Configured model names and estimates are unverified. Paid provider calls remain disabled.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -244,75 +230,10 @@ export const DoctorView: React.FC = () => {
             </div>
           </div>
 
-          {/* In-Browser CLI Terminal for OpenCode & Operator Testing */}
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-teal-400" />
-                <span>OpenCode & Automation CLI Terminal (Test Runner)</span>
-              </h3>
-              <span className="text-[11px] font-mono text-slate-500">
-                Executes safe studio commands with --json output
-              </span>
-            </div>
-
-            <p className="text-slate-400 text-[11px]">
-              Test the exact machine-readable JSON outputs that OpenCode CLI agents receive on Windows/WSL:
-            </p>
-
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                {[
-                  'studio doctor --json',
-                  'studio continuity report --json',
-                  'studio episode show S01E001 --json',
-                  'studio youtube preflight --json',
-                ].map((sampleCmd) => (
-                  <button
-                    key={sampleCmd}
-                    onClick={() => {
-                      setCliInput(sampleCmd);
-                      handleExecuteCli(sampleCmd);
-                    }}
-                    className="px-2.5 py-1 rounded bg-slate-950 hover:bg-slate-800 text-teal-300 border border-slate-800 text-[11px] font-mono transition-colors"
-                  >
-                    {sampleCmd}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="text"
-                  value={cliInput}
-                  onChange={(e) => setCliInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleExecuteCli(cliInput)}
-                  placeholder="Type a studio command (e.g. studio doctor --json)..."
-                  className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-800 rounded text-slate-100 font-mono text-xs focus:outline-none focus:border-teal-500"
-                />
-                <button
-                  disabled={cliExecuting}
-                  onClick={() => handleExecuteCli(cliInput)}
-                  className="px-4 py-1.5 rounded bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold text-xs transition-colors shrink-0 disabled:opacity-50"
-                >
-                  {cliExecuting ? 'Running...' : 'Run'}
-                </button>
-              </div>
-
-              {cliOutput && (
-                <div className="mt-3 p-3.5 bg-slate-950 border border-slate-800 rounded-md">
-                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono mb-1.5">
-                    <span>STDOUT (JSON Result):</span>
-                    <button onClick={() => setCliOutput(null)} className="hover:text-slate-300">
-                      Clear
-                    </button>
-                  </div>
-                  <pre className="text-teal-300 font-mono text-[11px] max-h-56 overflow-y-auto whitespace-pre-wrap select-all">
-                    {cliOutput}
-                  </pre>
-                </div>
-              )}
-            </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 space-y-2">
+            <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Terminal className="w-4 h-4 text-teal-400" /> Typed operator CLI</h3>
+            <p className="text-slate-400 text-[11px]">The old browser pseudo-CLI was retired because it did not execute the real commands. Use the documented typed CLI in an authorized local terminal; diagnostics may perform filesystem probes.</p>
+            <code className="block text-teal-300 text-xs">npm run studio -- doctor --json</code>
           </div>
 
           {/* Remediation Guide */}

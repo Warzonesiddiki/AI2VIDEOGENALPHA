@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {
   getPilotVideoEssayData,
   generateThinkPadT14RenderScripts,
+  generateEdgeTtsScript,
+  generateShortsRenderScript,
+  generateMasterOrchestratorScript,
   generateVideoEssaySrt,
   generateVideoEssayYouTubeDescription,
 } from './video_essay.ts';
@@ -25,16 +28,11 @@ test('getPilotVideoEssayData: generates zero-credit structured video essay with 
   }
 });
 
-test('generateThinkPadT14RenderScripts: produces NVENC h264_nvenc hardware acceleration scripts', () => {
+test('legacy executable Video Essay exports fail closed, including network speech', () => {
   const data = getPilotVideoEssayData();
-  const { windowsBat, linuxSh } = generateThinkPadT14RenderScripts(data);
-
-  assert.ok(windowsBat.includes('h264_nvenc'));
-  assert.ok(windowsBat.includes('MX330'));
-  assert.ok(windowsBat.includes('sub_bass_pulse_55hz'));
-
-  assert.ok(linuxSh.includes('h264_nvenc'));
-  assert.ok(linuxSh.includes('master.mp4'));
+  for (const generate of [generateThinkPadT14RenderScripts, generateEdgeTtsScript, generateShortsRenderScript, generateMasterOrchestratorScript]) {
+    assert.throws(() => generate(data), /retired/i);
+  }
 });
 
 test('generateVideoEssaySrt: formats synchronized SubRip captions correctly', () => {

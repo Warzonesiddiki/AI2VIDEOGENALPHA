@@ -1,21 +1,22 @@
 import { reviewStoryCraft } from '../core/storyCraft.ts';
+import { nextScriptVersionNumber } from '../core/scriptVersions.ts';
 import React, { useState, useEffect, useRef } from 'react';
-import { EpisodeCard, ScriptVersion, CanonEvent } from '../types/index.ts';
-import { calculateNarrationPacing, calculateWordCount, validateCanonHardRules } from '../core/rules.ts';
+import { EpisodeCard, ScriptVersion } from '../types/index.ts';
+import { calculateNarrationPacing, calculateWordCount } from '../core/rules.ts';
+import { checkProjectCanon } from '../core/canonScope.ts';
 import {
-  FileText,
   Clock,
   CheckCircle2,
   AlertTriangle,
   Save,
   BookOpen,
   Volume2,
-  ShieldCheck,
 } from 'lucide-react';
 
 interface ScriptEditorViewProps {
   projectId: string;
   episodeId: string;
+  activeSeriesId?: string;
   onBack: () => void;
   onRefreshEpisode: () => void;
 }
@@ -23,13 +24,13 @@ interface ScriptEditorViewProps {
 export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
   projectId,
   episodeId,
+  activeSeriesId,
   onBack,
   onRefreshEpisode,
 }) => {
   const generation = useRef(0);
   const savingRef = useRef(false);
   const [episode, setEpisode] = useState<EpisodeCard | null>(null);
-  const [canonEvents, setCanonEvents] = useState<CanonEvent[]>([]);
   const [scriptText, setScriptText] = useState('');
   const [targetWpm, setTargetWpm] = useState(145);
   const [isSaving, setIsSaving] = useState(false);
@@ -57,7 +58,7 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
 
   const wordCount = calculateWordCount(scriptText);
   const pacing = calculateNarrationPacing(wordCount, targetWpm);
-  const canonCheck = validateCanonHardRules(scriptText);
+  const canonCheck = checkProjectCanon(projectId, scriptText);
   const storyCraft = reviewStoryCraft(episode ? {
     ...episode,
     activeScriptVersionIndex: 0,
@@ -66,6 +67,9 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
 
   const handleSaveDraft = async (approve: boolean = false) => {
     if (!episode || savingRef.current) return;
+    let versionNumber: number;
+    try { versionNumber = nextScriptVersionNumber(episode.scriptVersions); }
+    catch (error) { setSaveNotice(error instanceof Error ? error.message : 'Script versions need reconciliation'); return; }
     const current = generation.current;
     savingRef.current = true;
     setIsSaving(true);
@@ -73,7 +77,7 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
 
     const updatedVersions: ScriptVersion[] = [...(episode.scriptVersions || [])];
     const newVersion: ScriptVersion = {
-      versionNumber: (updatedVersions.length || 0) + 1,
+      versionNumber,
       fullNarrationText: scriptText,
       wordCount: pacing.wordCount,
       estimatedDurationSeconds: pacing.estimatedDurationSeconds,
@@ -81,12 +85,8 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
       isApproved: approve,
       approvedBy: approve ? 'Local operator review marker (identity unverified)' : undefined,
       approvalNotes: approve ? 'Local script review marker only; not independent rights, spend, technical QC or publication approval.' : undefined,
-      beats: episode.scriptVersions[0]?.beats || [],
-      pronunciationNotes: [
-        { term: 'Mistry', guide: 'MIS-tree' },
-        { term: 'Ilyan', guide: 'EEL-yahn' },
-        { term: 'Ternfall', guide: 'TURN-fawl' },
-      ],
+      beats: episode.scriptVersions[episode.activeScriptVersionIndex]?.beats || [],
+      pronunciationNotes: episode.scriptVersions[episode.activeScriptVersionIndex]?.pronunciationNotes || [],
       createdAt: new Date().toISOString(),
     };
 
@@ -164,7 +164,7 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
             <span>Save Version</span>
           </button>
           <button
-            disabled={isSaving || canonCheck.violatesHardRules}
+            disabled={isSaving || !scriptText.trim() || canonCheck.violatesHardRules}
             onClick={() => handleSaveDraft(true)}
             className="px-3.5 py-1.5 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40"
           >
@@ -174,9 +174,14 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
         </div>
       </div>
 
+      {activeSeriesId && episode.seriesId !== activeSeriesId && <div role="status" className="p-4 rounded-lg border border-amber-500/30 bg-amber-950/30 text-xs text-amber-200 space-y-1">
+        <p>This episode stores series {episode.seriesId}, but the active project series is {activeSeriesId}. Editing preserves the historical value; it does not silently migrate it.</p>
+        <p>Inspect the operator-only preview before deciding whether to reconcile: <code>npm run studio -- episode reconcile-series {episode.id} --project {projectId} --json</code>. Only a known legacy pattern is eligible.</p>
+      </div>}
+
       <section aria-label="Story craft review" className="p-4 rounded-xl border border-amber-500/25 bg-slate-900 text-sm space-y-2">
         <h2 className="font-semibold text-amber-200">Story craft — advisory, not a quality score or approval</h2>
-        <p className="text-xs text-slate-400">Check causal escalation, competing needs, a planted solution and an irreversible cost. Reading time is an estimate, not measured voice. A local review marker does not authorize spend or publication.</p>
+        <p className="text-xs text-slate-400">Check causal escalation, competing needs, a planted solution and an irreversible cost. Reading time is an estimate, not measured voice. Existing beats and pronunciation notes are carried forward on save; review them against the revised script. A local review marker does not authorize spend or publication.</p>
         {storyCraft.issues.length > 0 && <ul className="list-disc pl-5 text-xs text-amber-100 space-y-1">
           {storyCraft.issues.map(issue => <li key={issue.field}>{issue.question}</li>)}
         </ul>}
@@ -202,7 +207,7 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
             <span className="font-semibold text-slate-300">Narration & Spoken Beats:</span>
             <span className="font-mono text-[11px]">
               Version #{activeVersion?.versionNumber || 1}{' '}
-              {activeVersion?.isApproved ? '(Approved)' : '(Draft)'}
+              {activeVersion?.isApproved ? '(Local review marker)' : '(Draft)'}
             </span>
           </div>
 
@@ -214,12 +219,14 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
             className="w-full p-4 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 text-xs leading-relaxed font-sans focus:outline-none focus:border-teal-500 resize-y"
           />
 
+          {scriptText.trim() && !canonCheck.evaluated && <p role="status" className="text-xs text-amber-300">{canonCheck.reason}</p>}
+
           {/* Canon Warnings */}
           {canonCheck.violatesHardRules && (
             <div className="p-3 rounded bg-rose-950/40 border border-rose-900/60 text-xs text-rose-300 space-y-1">
               <div className="font-semibold flex items-center gap-1.5">
                 <AlertTriangle className="w-4 h-4 text-rose-400" />
-                <span>Hard Canon Violations Detected:</span>
+                <span>Ternfall keyword flags (review in context):</span>
               </div>
               {canonCheck.infractions.map((inf, i) => (
                 <div key={i} className="text-[11px] pl-5">
@@ -284,40 +291,17 @@ export const ScriptEditorView: React.FC<ScriptEditorViewProps> = ({
             </div>
           </div>
 
-          {/* Pronunciation Guide */}
           <div className="p-4 rounded-lg bg-slate-900 border border-slate-800 space-y-2">
-            <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-              <Volume2 className="w-4 h-4 text-teal-400" />
-              <span>Pronunciation Guide</span>
-            </h3>
-            <div className="space-y-1.5 text-xs font-mono">
-              <div className="flex justify-between p-1.5 rounded bg-slate-950 border border-slate-800/80">
-                <span className="text-slate-300">Rhea Mistry</span>
-                <span className="text-teal-400">RAY-uh MIS-tree</span>
-              </div>
-              <div className="flex justify-between p-1.5 rounded bg-slate-950 border border-slate-800/80">
-                <span className="text-slate-300">Mara Ilyan</span>
-                <span className="text-teal-400">EEL-yahn</span>
-              </div>
-              <div className="flex justify-between p-1.5 rounded bg-slate-950 border border-slate-800/80">
-                <span className="text-slate-300">Ternfall</span>
-                <span className="text-teal-400">TURN-fawl</span>
-              </div>
-            </div>
+            <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1.5"><Volume2 className="w-4 h-4 text-teal-400" /><span>Recorded pronunciation notes</span></h3>
+            {Array.isArray(activeVersion?.pronunciationNotes) && activeVersion.pronunciationNotes.length > 0 ? <ul className="space-y-1 text-xs">{activeVersion.pronunciationNotes.map((note, index) => <li key={index} className="flex justify-between gap-3 p-1.5 rounded bg-slate-950"><span>{note.term}</span><span className="text-teal-400">{note.guide}</span></li>)}</ul> : <p className="text-xs text-slate-400">No pronunciation notes recorded for this version.</p>}
           </div>
-
-          {/* Canon Check Anchors */}
           <div className="p-4 rounded-lg bg-slate-900 border border-slate-800 space-y-2">
-            <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-              <BookOpen className="w-4 h-4 text-teal-400" />
-              <span>Canon State for this Beat</span>
-            </h3>
-            <div className="text-[11px] text-slate-400 space-y-1 leading-relaxed">
-              <div>· Physical Location: South Gate Control Works</div>
-              <div>· Time: Day 01, 03:30 AM (Cold Salt Mist)</div>
-              <div>· Characters Present: Rhea Mistry, Mara Ilyan</div>
-              <div>· Knowledge: Infection spreads by contact; water supply is clean.</div>
-              <div>· Mechanical Pulse: 8 beats, 3 second pause.</div>
+            <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1.5"><BookOpen className="w-4 h-4 text-teal-400" /><span>Recorded episode context</span></h3>
+            <p className="text-[11px] text-slate-400">These are episode-card fields, not a verified continuity state.</p>
+            <div className="text-[11px] text-slate-300 space-y-1">
+              <p>Locations: {episode.physicalLocations?.join(', ') || 'Not recorded'}</p>
+              <p>Characters: {episode.charactersPresent?.join(', ') || 'Not recorded'}</p>
+              <p>Timeline: {episode.timeline ? `${episode.timeline.storyDate} · ${episode.timeline.elapsedTime} (${episode.timeline.confidence})` : 'Not recorded'}</p>
             </div>
           </div>
         </div>

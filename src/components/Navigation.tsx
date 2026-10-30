@@ -16,6 +16,7 @@ import {
   ExternalLink,
   Layers,
   Tv,
+  X,
 } from 'lucide-react';
 
 export type ActiveTab =
@@ -40,6 +41,9 @@ interface NavigationProps {
   projectName: string;
   isCloudPreview: boolean;
   blockedJobsCount: number;
+  mobileOpen: boolean;
+  navigationRef: React.RefObject<HTMLElement | null>;
+  onCloseNavigation: () => void;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
@@ -48,6 +52,9 @@ export const Navigation: React.FC<NavigationProps> = ({
   projectName,
   isCloudPreview,
   blockedJobsCount,
+  mobileOpen,
+  navigationRef,
+  onCloseNavigation,
 }) => {
   const navSections = [
     {
@@ -55,7 +62,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       items: [
         { id: 'dashboard' as ActiveTab, label: 'Dashboard', icon: Activity },
         { id: 'series_bible' as ActiveTab, label: 'Series Room', icon: BookOpen },
-        { id: 'roadmap' as ActiveTab, label: 'Roadmap (100 Arcs)', icon: MapPin },
+        { id: 'roadmap' as ActiveTab, label: 'Ternfall roadmap', icon: MapPin },
         { id: 'episodes' as ActiveTab, label: 'Episode Board', icon: ListTodo },
         { id: 'script_editor' as ActiveTab, label: 'Script & Pacing', icon: FileText },
         { id: 'research_room' as ActiveTab, label: 'Research Room', icon: Search },
@@ -64,13 +71,13 @@ export const Navigation: React.FC<NavigationProps> = ({
     {
       title: 'MEDIA & PRODUCTION',
       items: [
-        { id: 'video_essay' as ActiveTab, label: 'Video Essay (PPT+Voice)', icon: Tv, badge: '0-Credits' },
-        { id: 'scene_planner' as ActiveTab, label: 'Storyboard & Audio', icon: LayoutGrid },
-        { id: 'google_flow' as ActiveTab, label: 'Master Video & Shorts', icon: Film, badge: '24fps' },
-        { id: 'autoproducer' as ActiveTab, label: 'Autoproducer', icon: Bot },
+        { id: 'video_essay' as ActiveTab, label: 'Video Essay sample', icon: Tv },
+        { id: 'scene_planner' as ActiveTab, label: 'Local render', icon: LayoutGrid },
+        { id: 'google_flow' as ActiveTab, label: 'Flow plan & local render', icon: Film },
+        { id: 'autoproducer' as ActiveTab, label: 'Autoproducer history', icon: Bot },
         {
           id: 'jobs_queue' as ActiveTab,
-          label: 'Production Queue',
+          label: 'Historical jobs',
           icon: Film,
           badge: blockedJobsCount > 0 ? blockedJobsCount : undefined,
         },
@@ -87,7 +94,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   ];
 
   return (
-    <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 select-none">
+    <aside ref={navigationRef} id="studio-navigation" role={mobileOpen ? "dialog" : undefined} aria-modal={mobileOpen ? true : undefined} aria-label={mobileOpen ? "Navigation" : undefined} className={`${mobileOpen ? 'fixed inset-y-0 left-0 z-50 flex shadow-2xl' : 'hidden'} md:relative md:inset-auto md:z-auto md:flex w-64 bg-slate-900 border-r border-slate-800 flex-col shrink-0 select-none`}>
       {/* Brand & Project Identity */}
       <div className="p-4 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -99,10 +106,11 @@ export const Navigation: React.FC<NavigationProps> = ({
               {projectName}
             </span>
             <span className="text-xs text-teal-400 font-mono block">
-              1,000-Ep Backbone
+              Project workspace
             </span>
           </div>
         </div>
+        {mobileOpen && <button type="button" aria-label="Close navigation" onClick={onCloseNavigation} className="md:hidden rounded border border-slate-700 p-2 text-slate-200"><X className="w-4 h-4" aria-hidden="true" /></button>}
       </div>
 
       {/* Cloud Preview Notice Pill-Free */}
@@ -113,13 +121,13 @@ export const Navigation: React.FC<NavigationProps> = ({
             <span>Cloud Preview Mode</span>
           </div>
           <p className="text-slate-400 text-[11px] leading-tight">
-            Local Windows disk & FFmpeg render paths stay safely mocked in browser preview.
+            This browser is not the server. Local renders use files available to the server, not paths on your computer.
           </p>
         </div>
       )}
 
       {/* Navigation Groups */}
-      <nav className="flex-1 px-3 py-4 space-y-6 overflow-y-auto">
+      <nav aria-label="Studio navigation" className="flex-1 px-3 py-4 space-y-6 overflow-y-auto">
         {navSections.map((section) => (
           <div key={section.title} className="space-y-1">
             <div className="px-2.5 pb-1 text-[11px] font-semibold tracking-wider text-slate-500">
@@ -131,6 +139,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               return (
                 <button
                   key={item.id}
+                  aria-current={isActive ? "page" : undefined}
                   onClick={() => onSelectTab(item.id)}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     isActive

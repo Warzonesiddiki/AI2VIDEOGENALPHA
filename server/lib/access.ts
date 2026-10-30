@@ -4,6 +4,14 @@ import type { RequestHandler } from 'express';
 /** HTTP Basic is browser-compatible; Bearer supports automation. Never log credentials. */
 export function operatorAccess(token?: string): RequestHandler {
   return (req, res, next) => {
+    // Browser Fetch Metadata is a defense-in-depth signal, including when an
+    // Origin header is absent. Non-browser clients may omit it; authentication
+    // and the existing Origin/Host checks still apply.
+    const site = req.get('Sec-Fetch-Site');
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && (site === 'cross-site' || site === 'same-site')) {
+      res.status(403).json({ ok: false, error: 'Cross-site requests are not permitted' });
+      return;
+    }
     if (req.headers.origin) {
       try {
         const origin = new URL(req.headers.origin);

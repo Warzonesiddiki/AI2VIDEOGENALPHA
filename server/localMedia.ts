@@ -1,7 +1,7 @@
 import { VerifiedMediaReader } from './lib/verifiedMedia.ts';
 import { hashMediaFile, snapshotMediaFile } from './lib/fileEvidence.ts';
 import fs from 'node:fs/promises';
-import { existsSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readlinkSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -9,6 +9,7 @@ import { validateFrameFile } from './lib/frameValidation.ts';
 import { DocumentStore } from './lib/documents.ts';
 import { assertIdentifier, safePath, productionRoot } from './lib/paths.ts';
 import { mediaBinary, mediaProcess } from './lib/mediaProcess.ts';
+import { MediaRequestError } from './lib/mediaErrors.ts';
 
 export interface LocalRenderRequest {
   projectId: string; episodeId: string; frameCount: number; fps: 24;
@@ -28,20 +29,39 @@ export interface SegmentCheckpoint {
 export interface RenderProgress { totalSegments: number; completedSegments: number; encodedSegments: number; reusedSegments: number }
 export const LOCAL_RENDER_MAX_FRAMES = 21_600;
 export const LOCAL_RENDER_SEGMENT_FRAMES = 120; // Five seconds; only one segment is staged at a time.
+/** Preserved evidence of an operator-attested offline resolution of an
+ * incomparable worker claim. Attestations are recorded, never inferred. */
+export interface WorkerClaimAdjudication {
+  adjudicatedAt: string;
+  note: string;
+  confirmStopped: true;
+  attestIsolated: true;
+  claim: { ownerPid?: number; ownerHost?: string; ownerToken?: string; ownerDomain?: { bootId: string; pidNamespace: string } };
+}
 export interface LocalRenderJob extends LocalRenderRequest {
   id: string; state: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
   stage: string; createdAt: string; updatedAt: string; attempt: number; cancelRequested: boolean;
   ownerPid?: number; ownerHost?: string; ownerToken?: string;
+  ownerDomain?: { bootId: string; pidNamespace: string };
+  claimAdjudications?: WorkerClaimAdjudication[];
   error?: string; outputPath?: string; qc?: MediaQC;
   checkpoints?: SegmentCheckpoint[]; progress?: RenderProgress;
   retiredCheckpointTokens?: string[]; checkpointsPurgedAt?: string;
   manifest?: { frames: FrameEvidence[]; audioSha256: string };
 }
+/** Browser-safe projection; process identity, raw diagnostics and filesystem paths remain local. */
+export type PublicLocalRenderJob = Omit<LocalRenderJob, 'ownerPid' | 'ownerHost' | 'ownerToken' | 'ownerDomain' | 'claimAdjudications' | 'outputPath' | 'checkpoints' | 'retiredCheckpointTokens'> & {
+  checkpoints?: Array<Omit<SegmentCheckpoint, 'path'>>;
+  retiredCheckpointCount: number;
+  claimAdjudications?: Array<{ adjudicatedAt: string; note: string }>;
+};
 const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex');
 function checkRequest(value: LocalRenderRequest) {
-  for (const field of ['projectId', 'episodeId', 'idempotencyKey'] as const) assertIdentifier(value[field]);
-  if (value.fps !== 24 || !Number.isInteger(value.frameCount) || value.frameCount < 24 || value.frameCount > LOCAL_RENDER_MAX_FRAMES) throw new Error('Local renders require 24–21600 frames at 24fps (1–900 seconds)');
-  if (typeof value.audioFile !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,100}\.(wav|flac)$/.test(value.audioFile)) throw new Error('Audio must be a WAV/FLAC basename inside the episode audio directory');
+  if (!value || typeof value !== 'object') throw new MediaRequestError('INVALID_RENDER_REQUEST');
+  try { for (const field of ['projectId', 'episodeId', 'idempotencyKey'] as const) assertIdentifier(value[field]); }
+  catch { throw new MediaRequestError('INVALID_IDENTIFIER'); }
+  if (value.fps !== 24 || !Number.isInteger(value.frameCount) || value.frameCount < 24 || value.frameCount > LOCAL_RENDER_MAX_FRAMES) throw new MediaRequestError('INVALID_FRAME_COUNT');
+  if (typeof value.audioFile !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,100}\.(wav|flac)$/.test(value.audioFile)) throw new MediaRequestError('INVALID_AUDIO_FILE');
 }
 function loudness(stderr: string) {
   const block = stderr.match(/\{\s*"input_i"[\s\S]*?\}/g)?.at(-1);
@@ -53,18 +73,51 @@ function loudness(stderr: string) {
   return data;
 }
 
+/** A PID is meaningful only in its machine boot and PID namespace. If those
+ * cannot be identified, cross-process recovery must remain an operator issue. */
+function localProcessDomain(): LocalRenderJob['ownerDomain'] | undefined {
+  if (process.platform !== 'linux') return undefined;
+  try {
+    const bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim().toLowerCase();
+    const pidNamespace = readlinkSync('/proc/self/ns/pid');
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(bootId) || !/^pid:\[\d+\]$/.test(pidNamespace)) return undefined;
+    return { bootId, pidNamespace };
+  } catch { return undefined; }
+}
+
+function validateJobIdentities(value: unknown): asserts value is LocalRenderJob[] {
+  if (!Array.isArray(value)) throw new Error('Invalid local render jobs document');
+  const seen = new Set<string>();
+  for (const job of value) {
+    if (!job || typeof job !== 'object' || typeof job.id !== 'string' || typeof job.projectId !== 'string') {
+      throw new Error('Invalid local render job identity');
+    }
+    assertIdentifier(job.id); assertIdentifier(job.projectId);
+    if (seen.has(job.id)) throw new Error('Ambiguous duplicate local render job ID; repair is required');
+    seen.add(job.id);
+  }
+}
+
 /** No provider calls, no synthetic fallback assets, no public publication. */
 export class LocalMediaService {
   private documents?: DocumentStore;
   private get db() { return this.documents ??= new DocumentStore(this.root); }
   private controllers = new Map<string, AbortController>();
+  // Tokens for claims this instance knows have stopped after a terminal-state write failure.
+  // This never infers another live worker is dead merely from an absent local controller.
+  private abandonedClaims = new Set<string>();
+  private ownerDomain = localProcessDomain();
   private mediaReader?: VerifiedMediaReader;
   private file: string;
   constructor(private root = productionRoot, private binaries = { ffmpeg: mediaBinary('ffmpeg'), ffprobe: mediaBinary('ffprobe') }) {
     this.root = path.resolve(root); this.file = safePath(this.root, 'local_render_jobs.json');
   }
   close() { if (this.controllers.size) throw new Error('Cannot close an active media worker'); this.documents?.close(); this.documents = undefined; }
-  private jobs() { return this.db.read<LocalRenderJob[]>(this.file, []); }
+  private jobs() {
+    const jobs = this.db.read<unknown>(this.file, []);
+    validateJobIdentities(jobs);
+    return jobs;
+  }
   list(projectId: string) { assertIdentifier(projectId); return this.jobs().filter(job => job.projectId === projectId); }
   get(projectId: string, jobId: string) { assertIdentifier(jobId); return this.list(projectId).find(job => job.id === jobId) ?? null; }
   enqueue(request: LocalRenderRequest): LocalRenderJob {
@@ -73,51 +126,106 @@ export class LocalMediaService {
       const jobs = this.jobs();
       const previous = jobs.find(job => job.projectId === request.projectId && job.idempotencyKey === request.idempotencyKey);
       if (previous) {
-        for (const field of ['episodeId', 'frameCount', 'fps', 'audioFile'] as const) if (previous[field] !== request[field]) throw new Error('Idempotency key conflicts with another render');
+        for (const field of ['episodeId', 'frameCount', 'fps', 'audioFile'] as const) if (previous[field] !== request[field]) throw new MediaRequestError('RENDER_KEY_CONFLICT');
         return previous;
       }
-      if (jobs.filter(job => ['queued', 'running'].includes(job.state)).length >= 8) throw new Error('Local render queue is full');
+      if (jobs.filter(job => ['queued', 'running'].includes(job.state)).length >= 8) throw new MediaRequestError('RENDER_QUEUE_FULL');
       const now = new Date().toISOString();
       const job: LocalRenderJob = { ...request, id: `render_${randomUUID()}`, state: 'queued', stage: 'queued', createdAt: now, updatedAt: now, attempt: 0, cancelRequested: false };
-      jobs.push(job); this.db.write(this.file, jobs); return job;
+      jobs.push(job); validateJobIdentities(jobs); this.db.write(this.file, jobs); return job;
     });
   }
-  private change(id: string, update: (job: LocalRenderJob) => void): LocalRenderJob {
-    let changed!: LocalRenderJob;
-    this.db.update<LocalRenderJob[]>(this.file, [], jobs => {
-      const job = jobs.find(item => item.id === id); if (!job) throw new Error('Local render not found');
-      update(job); job.updatedAt = new Date().toISOString(); changed = job; return jobs;
+  private change(projectId: string, id: string, update: (job: LocalRenderJob) => void | false): LocalRenderJob {
+    assertIdentifier(projectId); assertIdentifier(id);
+    return this.db.transaction(() => {
+      const jobs = this.jobs();
+      const job = jobs.find(item => item.id === id && item.projectId === projectId);
+      if (!job) throw new MediaRequestError('RENDER_NOT_FOUND');
+      // A stale worker can decline a transition without writing another owner's record.
+      if (update(job) !== false) { job.updatedAt = new Date().toISOString(); this.db.write(this.file, jobs); }
+      return job;
     });
-    return changed;
   }
   cancel(projectId: string, id: string) {
-    if (!this.get(projectId, id)) throw new Error('Local render not found');
-    const job = this.change(id, job => {
-      if (!['queued', 'running'].includes(job.state)) throw new Error('Render is already terminal');
+    if (!this.get(projectId, id)) throw new MediaRequestError('RENDER_NOT_FOUND');
+    const job = this.change(projectId, id, job => {
+      if (!['queued', 'running'].includes(job.state)) throw new MediaRequestError('RENDER_ALREADY_TERMINAL');
       job.cancelRequested = true;
       if (job.state === 'queued') { job.state = 'cancelled'; job.stage = 'cancelled'; }
     });
     this.controllers.get(id)?.abort(); return job;
   }
+  /** Evidence classes for a running claim:
+   * - 'recoverable': this process domain can prove the owner is gone.
+   * - 'live': this process domain can prove the owner still exists.
+   * - 'incomparable': liveness cannot be proven either way here (legacy,
+   *   foreign boot/namespace/host, malformed identity, or uncertain probe).
+   *   Only an operator attestation may resolve an incomparable claim. */
+  private claimAssessment(job: LocalRenderJob): 'recoverable' | 'live' | 'incomparable' {
+    if (job.state !== 'running' || job.ownerHost !== os.hostname() || !Number.isSafeInteger(job.ownerPid) || job.ownerPid! <= 0 || typeof job.ownerToken !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(job.ownerToken)) return 'incomparable';
+    if (job.ownerPid === process.pid && this.abandonedClaims.has(job.ownerToken)) return 'recoverable';
+    // Do not interpret a PID from a different or unknown PID namespace/boot.
+    if (!this.ownerDomain || job.ownerDomain?.bootId !== this.ownerDomain.bootId || job.ownerDomain?.pidNamespace !== this.ownerDomain.pidNamespace) return 'incomparable';
+    try { process.kill(job.ownerPid!, 0); return 'live'; }
+    catch (error: any) { return error.code === 'ESRCH' ? 'recoverable' : 'incomparable'; }
+  }
+  private canRecover(job: LocalRenderJob): boolean {
+    return this.claimAssessment(job) === 'recoverable';
+  }
   /** A dead owner can never certify success. Recovery requires an explicit new attempt. */
   recoverInterrupted(): number {
+    // A read-only preflight avoids taking SQLite's writer lock on every idle poll.
+    // Re-read and repeat the liveness check inside the transaction before changing anything.
+    if (!this.db.has(this.file) && !existsSync(this.file)) return 0;
+    if (!this.jobs().some(job => this.canRecover(job))) return 0;
     let count = 0;
-    this.db.update<LocalRenderJob[]>(this.file, [], jobs => {
+    const reconciledTokens: string[] = [];
+    this.db.transaction(() => {
+      const jobs = this.jobs();
       for (const job of jobs) {
-        if (job.state !== 'running' || job.ownerHost !== os.hostname() || !job.ownerPid) continue;
-        try { process.kill(job.ownerPid, 0); continue; } catch (error: any) { if (error.code !== 'ESRCH') continue; }
+        if (!this.canRecover(job)) continue;
         job.state = 'interrupted'; job.stage = 'interrupted'; job.error = 'Worker exited before artifact verification'; job.updatedAt = new Date().toISOString(); count++;
+        if (job.ownerToken) reconciledTokens.push(job.ownerToken);
       }
-      return jobs;
-    }); return count;
+      if (count) this.db.write(this.file, jobs);
+    });
+    // Delete only after the transaction commits; a failed recovery can be retried.
+    for (const token of reconciledTokens) this.abandonedClaims.delete(token);
+    return count;
   }
   retry(projectId: string, id: string) {
-    if (!this.get(projectId, id)) throw new Error('Local render not found');
-    return this.change(id, job => {
-      if (this.jobs().filter(item => ['queued', 'running'].includes(item.state)).length >= 8) throw new Error('Local render queue is full');
-      if (!['failed', 'interrupted', 'cancelled'].includes(job.state)) throw new Error('Only unsuccessful terminal jobs can be retried');
+    if (!this.get(projectId, id)) throw new MediaRequestError('RENDER_NOT_FOUND');
+    return this.change(projectId, id, job => {
+      if (this.jobs().filter(item => ['queued', 'running'].includes(item.state)).length >= 8) throw new MediaRequestError('RENDER_QUEUE_FULL');
+      if (!['failed', 'interrupted', 'cancelled'].includes(job.state)) throw new MediaRequestError('RENDER_NOT_RETRYABLE');
       job.state = 'queued'; job.stage = 'queued'; job.cancelRequested = false;
       delete job.error; delete job.qc; delete job.outputPath; delete job.manifest;
+    });
+  }
+  /**
+   * Operator-authorized offline resolution of an incomparable worker claim.
+   * This is the only path that can settle a claim the local process domain
+   * cannot judge (legacy, foreign boot/namespace/host, or uncertain probes).
+   * It requires explicit dual attestation and a bounded evidence note; it
+   * records the claim as history, never starts work, never deletes artifacts,
+   * and refuses whenever process evidence exists (live or recoverable).
+   */
+  adjudicateClaim(projectId: string, id: string, attestation: { confirmStopped: unknown; attestIsolated: unknown; note: unknown }): LocalRenderJob {
+    if (!this.get(projectId, id)) throw new MediaRequestError('RENDER_NOT_FOUND');
+    if (attestation?.confirmStopped !== true || attestation?.attestIsolated !== true) throw new MediaRequestError('RENDER_ADJUDICATION_ATTESTATION_REQUIRED');
+    const note = attestation.note;
+    if (typeof note !== 'string' || note.trim().length < 1 || note.length > 2000) throw new MediaRequestError('RENDER_ADJUDICATION_NOTE_REQUIRED');
+    return this.change(projectId, id, job => {
+      if (job.state !== 'running') throw new MediaRequestError('RENDER_ADJUDICATION_NOT_APPLICABLE');
+      const assessment = this.claimAssessment(job);
+      if (assessment === 'live') throw new MediaRequestError('RENDER_ADJUDICATION_WORKER_LIVE');
+      if (assessment === 'recoverable') throw new MediaRequestError('RENDER_ADJUDICATION_USE_RECOVERY');
+      job.claimAdjudications = [...(job.claimAdjudications ?? []), {
+        adjudicatedAt: new Date().toISOString(), note: note.trim(), confirmStopped: true, attestIsolated: true,
+        claim: { ownerPid: job.ownerPid, ownerHost: job.ownerHost, ownerToken: job.ownerToken, ownerDomain: job.ownerDomain },
+      }];
+      job.state = 'interrupted'; job.stage = 'interrupted';
+      job.error = 'Worker claim adjudicated by operator attestation; no artifact verification was performed by this resolution.';
     });
   }
   /** Detach synchronously under the same SQLite lock used by retry/claim.
@@ -126,9 +234,9 @@ export class LocalMediaService {
    * no missing cache can certify a successful render.
    */
   async purgeCheckpoints(projectId: string, id: string): Promise<LocalRenderJob> {
-    if (!this.get(projectId, id)) throw new Error('Local render not found');
-    const detached = this.change(id, job => {
-      if (['queued', 'running'].includes(job.state)) throw new Error('Checkpoint cleanup requires a terminal render');
+    if (!this.get(projectId, id)) throw new MediaRequestError('RENDER_NOT_FOUND');
+    const detached = this.change(projectId, id, job => {
+      if (['queued', 'running'].includes(job.state)) throw new MediaRequestError('RENDER_CHECKPOINTS_ACTIVE');
       const live = safePath(this.root, `projects/${projectId}/local_checkpoints/${id}`);
       if (existsSync(live)) {
         const token = randomUUID();
@@ -145,7 +253,7 @@ export class LocalMediaService {
       // from requests, checkpoint metadata or stale output manifests.
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(token)) throw new Error('Invalid checkpoint retirement token');
       await fs.rm(safePath(this.root, `projects/${projectId}/local_checkpoint_trash/${id}/${token}`), { recursive: true, force: true });
-      this.change(id, current => { current.retiredCheckpointTokens = (current.retiredCheckpointTokens ?? []).filter(item => item !== token); });
+      this.change(projectId, id, current => { current.retiredCheckpointTokens = (current.retiredCheckpointTokens ?? []).filter(item => item !== token); });
     }
     return this.get(projectId, id)!;
   }
@@ -155,41 +263,60 @@ export class LocalMediaService {
       const job = jobs.find(job => job.state === 'queued'); if (!job) return null;
       job.state = 'running'; job.stage = 'validating_inputs'; job.attempt++;
       job.progress = { totalSegments: Math.ceil(job.frameCount / LOCAL_RENDER_SEGMENT_FRAMES), completedSegments: 0, encodedSegments: 0, reusedSegments: 0 };
-      job.ownerPid = process.pid; job.ownerHost = os.hostname(); job.ownerToken = randomUUID(); job.updatedAt = new Date().toISOString();
+      job.ownerPid = process.pid; job.ownerHost = os.hostname(); job.ownerToken = randomUUID(); job.ownerDomain = this.ownerDomain; job.updatedAt = new Date().toISOString();
       this.db.write(this.file, jobs); return job;
     });
   }
   async runNext(): Promise<LocalRenderJob | null> {
     const job = this.claim(); if (!job) return null;
     const controller = new AbortController(); this.controllers.set(job.id, controller);
-    const work = safePath(this.root, `projects/${job.projectId}/local_work/${job.id}/attempt_${job.attempt}`);
-    const poll = setInterval(() => { try { if (this.get(job.projectId, job.id)?.cancelRequested) controller.abort(); } catch { controller.abort(); } }, 500);
+    let work: string | undefined;
+    let poll: ReturnType<typeof setInterval> | undefined;
+    let failedTerminalWrite = false;
     try {
+      // All setup after the durable claim belongs inside the failure boundary.
+      // In particular, a rejected work path must not strand a running job or controller.
+      work = safePath(this.root, `projects/${job.projectId}/local_work/${job.id}/attempt_${job.attempt}`);
+      poll = setInterval(() => { try { if (this.get(job.projectId, job.id)?.cancelRequested) controller.abort(); } catch { controller.abort(); } }, 500);
       await fs.mkdir(work, { recursive: true });
       const result = await this.render(job, work, controller.signal);
-      this.change(job.id, current => {
+      this.change(job.projectId, job.id, current => {
         if (current.ownerToken !== job.ownerToken || current.state !== 'running' || current.cancelRequested) throw new Error('Render ownership changed or cancellation requested');
         current.manifest = result.manifest; current.qc = result.qc; current.outputPath = result.outputPath;
         current.state = 'succeeded'; current.stage = 'technical_qc_passed';
       });
     } catch (error: any) {
-      this.change(job.id, current => {
-        if (current.ownerToken !== job.ownerToken || current.state !== 'running') return;
-        current.state = current.cancelRequested || controller.signal.aborted ? 'cancelled' : 'failed';
-        current.stage = current.state; current.error = String(error.message).slice(-4000);
-        delete current.outputPath; delete current.qc;
-      });
-    } finally {
       try {
-        if (this.get(job.projectId, job.id)?.state !== 'succeeded') {
+        this.change(job.projectId, job.id, current => {
+          if (current.ownerToken !== job.ownerToken || current.state !== 'running') return false;
+          current.state = current.cancelRequested || controller.signal.aborted ? 'cancelled' : 'failed';
+          current.stage = current.state; current.error = String(error.message).slice(-4000);
+          delete current.outputPath; delete current.qc;
+        });
+      } catch (transitionError) {
+        failedTerminalWrite = true;
+        throw new Error('Could not persist render failure; recovery is required before retry.', { cause: transitionError });
+      }
+    } finally {
+      let ownsAttempt = false;
+      try {
+        const current = this.get(job.projectId, job.id);
+        ownsAttempt = !!current && current.ownerToken === job.ownerToken && current.attempt === job.attempt;
+        if (ownsAttempt && current!.state !== 'succeeded') {
           await fs.rm(safePath(this.root, `projects/${job.projectId}/exports/local/${job.id}/attempt_${job.attempt}`), { recursive: true, force: true });
         }
       } finally {
         // Disk/metadata cleanup errors must never strand cancellation resources.
-        clearInterval(poll); this.controllers.delete(job.id);
-        // Attempt scratch cleanup even if export cleanup failed. Errors remain visible
-        // to the operator; terminal render/QC state is not rewritten as cleanup proof.
-        await fs.rm(safePath(this.root, work), { recursive: true, force: true });
+        if (poll) clearInterval(poll);
+        this.controllers.delete(job.id);
+        // Do not touch a replacement owner's same-attempt files; uncertain paths
+        // remain for operator investigation rather than being deleted speculatively.
+        // Attempt scratch cleanup even if export cleanup failed.
+        try {
+          if (work && ownsAttempt) await fs.rm(safePath(this.root, work), { recursive: true, force: true });
+        } finally {
+          if (failedTerminalWrite && job.ownerToken) this.abandonedClaims.add(job.ownerToken);
+        }
       }
     }
     return this.get(job.projectId, job.id);
@@ -198,7 +325,7 @@ export class LocalMediaService {
     return JSON.parse((await mediaProcess(this.binaries.ffprobe, ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-f', format, '-count_frames', '-show_streams', '-show_format', '-of', 'json', file], signal, timeoutMs)).stdout);
   }
   private owned(job: LocalRenderJob, update: (current: LocalRenderJob) => void) {
-    return this.change(job.id, current => {
+    return this.change(job.projectId, job.id, current => {
       if (current.state !== 'running' || current.ownerToken !== job.ownerToken || current.cancelRequested) throw new Error('Render ownership changed or cancellation requested');
       update(current);
     });
@@ -282,7 +409,7 @@ export class LocalMediaService {
     const audioStream = audioInfo.streams?.find((stream: any) => stream.codec_type === 'audio');
     if (!audioStream || Number(audioInfo.format?.duration) < duration || !Number.isFinite(Number(audioInfo.format?.duration))) throw new Error('Audio must decode and cover the entire planned duration');
     const measured = loudness((await mediaProcess(this.binaries.ffmpeg, ['-nostdin', '-hide_banner', '-v', 'info', '-xerror', '-protocol_whitelist', 'file,pipe', '-f', job.audioFile.endsWith('.flac') ? 'flac' : 'wav', '-i', audioPath, '-t', String(duration), '-af', `atrim=duration=${duration},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json`, '-f', 'null', '-'], signal, operationTimeout)).stderr);
-    this.change(job.id, current => { current.stage = 'rendering'; });
+    this.owned(job, current => { current.stage = 'rendering'; });
     const candidate = safePath(this.root, path.join(work, 'candidate.mp4'));
     // Some FFmpeg builds treat measured_LRA=0 as an unset measurement. A tiny
     // positive floor selects linear mode; ignore that first-pass offset in this case.
@@ -302,7 +429,7 @@ export class LocalMediaService {
     // All video segments are already encoded; mux only, with one continuous audio track.
     await mediaProcess(this.binaries.ffmpeg, ['-nostdin', '-hide_banner', '-v', 'error', '-xerror', '-protocol_whitelist', 'file,pipe', '-f', 'mov', '-i', joined, '-f', 'wav', '-i', normalizedAudio,
       '-map', '0:v:0', '-map', '1:a:0', '-t', String(duration), '-c:v', 'copy', '-ar', '48000', '-ac', '2', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', candidate], signal, operationTimeout);
-    this.change(job.id, current => { current.stage = 'measuring_qc'; });
+    this.owned(job, current => { current.stage = 'measuring_qc'; });
     const output = await this.probe(candidate, signal, 'mov', operationTimeout);
     await mediaProcess(this.binaries.ffmpeg, ['-nostdin', '-v', 'error', '-xerror', '-protocol_whitelist', 'file,pipe', '-f', 'mov', '-i', candidate, '-f', 'null', '-'], signal, operationTimeout);
     const measuredOutput = loudness((await mediaProcess(this.binaries.ffmpeg, ['-nostdin', '-hide_banner', '-protocol_whitelist', 'file,pipe', '-f', 'mov', '-i', candidate, '-vn', '-af', 'loudnorm=I=-14:TP=-1:LRA=11:print_format=json', '-f', 'null', '-'], signal, operationTimeout)).stderr);
@@ -338,7 +465,7 @@ export class LocalMediaService {
   /** Authorized path lookup for internal tooling. HTTP playback additionally verifies bytes. */
   mediaPath(projectId: string, jobId: string): string {
     const job = this.get(projectId, jobId);
-    if (!job || job.state !== 'succeeded' || !job.qc?.passed || !job.outputPath) throw new Error('No QC-verified output is available');
+    if (!job || job.state !== 'succeeded' || !job.qc?.passed || !job.outputPath) throw new MediaRequestError('RENDER_OUTPUT_UNAVAILABLE');
     return safePath(this.root, job.outputPath);
   }
 }
